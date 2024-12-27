@@ -1,290 +1,62 @@
 package stdio
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"sync"
 	"sync/atomic"
 
-	"github.com/RinardNick/go-mcp-sdk/pkg/client"
 	"github.com/RinardNick/go-mcp-sdk/pkg/types"
 )
 
-// StdioClient implements the Client interface using stdio communication
+// StdioClient represents a client that communicates over stdio
 type StdioClient struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	mu     sync.Mutex
+	stdin  io.Writer
+	stdout io.Reader
 	nextID int64
-
-	// Response handling
-	respMu      sync.Mutex
-	respReaders map[int64]chan *types.Response
-	done        chan struct{}
+	mu     sync.Mutex
 }
 
-// request represents a JSON-RPC request
-type request struct {
-	Jsonrpc string      `json:"jsonrpc"`
-	Method  string      `json:"method"`
-	Params  interface{} `json:"params,omitempty"`
-	ID      int64       `json:"id"`
+// NewClient creates a new stdio client
+func NewClient(stdin io.Writer, stdout io.Reader) *StdioClient {
+	return &StdioClient{
+		stdin:  stdin,
+		stdout: stdout,
+	}
 }
 
-// notification represents a JSON-RPC notification (no ID)
-type notification struct {
-	Jsonrpc string      `json:"jsonrpc"`
-	Method  string      `json:"method"`
-	Params  interface{} `json:"params,omitempty"`
-}
+// Initialize sends the initialization request to the server
+func (c *StdioClient) Initialize(ctx context.Context) error {
+	params := &types.InitializeParams{
+		ProtocolVersion: "0.1.0",
+		ClientInfo: types.ClientInfo{
+			Name:    "go-mcp-sdk",
+			Version: "1.0.0",
+		},
+		Capabilities: types.ClientCapabilities{
+			Tools: &types.ToolCapabilities{
+				SupportsProgress:     true,
+				SupportsCancellation: true,
+			},
+		},
+	}
 
-// batchRequest represents a JSON-RPC batch request
-type batchRequest struct {
-	Requests []request `json:"requests"`
-}
-
-// batchResponse represents a JSON-RPC batch response
-type batchResponse struct {
-	Responses []types.Response `json:"responses"`
-}
-
-// NewStdioClient creates a new stdio client
-func NewStdioClient(command string, args ...string) (*StdioClient, error) {
-	cmd := exec.Command(command, args...)
-
-	// Set up pipes
-	stdinPipe, err := cmd.StdinPipe()
+	_, err := c.SendRequest(ctx, "initialize", params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
+		return fmt.Errorf("initialization failed: %w", err)
 	}
 
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	client := &StdioClient{
-		cmd:         cmd,
-		stdin:       stdinPipe,
-		stdout:      stdoutPipe,
-		respReaders: make(map[int64]chan *types.Response),
-		done:        make(chan struct{}),
-	}
-
-	// Start response reader goroutine
-	go client.readResponses()
-
-	// Set up stderr logging
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start command: %w", err)
-	}
-
-	return client, nil
+	// Send initialized notification
+	return c.SendNotification(ctx, "initialized", nil)
 }
 
-// readResponses reads responses from stdout and routes them to the appropriate reader
-func (c *StdioClient) readResponses() {
-	defer func() {
-		c.respMu.Lock()
-		for _, ch := range c.respReaders {
-			close(ch)
-		}
-		c.respReaders = nil
-		c.respMu.Unlock()
-	}()
-
-	decoder := json.NewDecoder(c.stdout)
-	for {
-		select {
-		case <-c.done:
-			return
-		default:
-			// Try to decode the response
-			var rawMsg json.RawMessage
-			if err := decoder.Decode(&rawMsg); err != nil {
-				if err == io.EOF {
-					return
-				}
-				fmt.Printf("STDIO: Error decoding response: %v\n", err)
-				continue
-			}
-
-			// Try to decode as batch response
-			var batchResp batchResponse
-			if err := json.Unmarshal(rawMsg, &batchResp); err == nil && len(batchResp.Responses) > 0 {
-				c.respMu.Lock()
-				for _, resp := range batchResp.Responses {
-					if ch, ok := c.respReaders[resp.ID]; ok {
-						ch <- &resp
-						delete(c.respReaders, resp.ID)
-					}
-				}
-				c.respMu.Unlock()
-				continue
-			}
-
-			// Try single response
-			var resp types.Response
-			if err := json.Unmarshal(rawMsg, &resp); err != nil {
-				fmt.Printf("STDIO: Error decoding response: %v\n", err)
-				continue
-			}
-
-			c.respMu.Lock()
-			if ch, ok := c.respReaders[resp.ID]; ok {
-				ch <- &resp
-				delete(c.respReaders, resp.ID)
-			}
-			c.respMu.Unlock()
-		}
-	}
-}
-
-// NewSession creates a new session with this client
-func (c *StdioClient) NewSession(reader io.Reader, writer io.Writer) (*client.Session, error) {
-	return client.NewSession(reader, writer, c)
-}
-
-// SendRequest sends a JSON-RPC request and returns the response
-func (c *StdioClient) SendRequest(ctx context.Context, method string, params interface{}) (*types.Response, error) {
-	c.mu.Lock()
-	id := atomic.AddInt64(&c.nextID, 1)
-	req := request{
-		Jsonrpc: "2.0",
-		Method:  method,
-		Params:  params,
-		ID:      id,
-	}
-
-	// Create response channel
-	respCh := make(chan *types.Response, 1)
-	c.respMu.Lock()
-	c.respReaders[id] = respCh
-	c.respMu.Unlock()
-	c.mu.Unlock()
-
-	// Send request
-	fmt.Printf("STDIO: Sending request %d: %+v\n", id, req)
-	if err := json.NewEncoder(c.stdin).Encode(req); err != nil {
-		return nil, fmt.Errorf("failed to encode request: %w", err)
-	}
-	fmt.Printf("STDIO: Request %d sent\n", id)
-
-	// Wait for response or context cancellation
-	select {
-	case <-ctx.Done():
-		c.respMu.Lock()
-		delete(c.respReaders, id)
-		c.respMu.Unlock()
-		return nil, ctx.Err()
-	case resp := <-respCh:
-		if resp.Error != nil {
-			return nil, resp.Error
-		}
-		return resp, nil
-	}
-}
-
-// SendNotification sends a JSON-RPC notification (no response expected)
-func (c *StdioClient) SendNotification(ctx context.Context, method string, params interface{}) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	notif := notification{
-		Jsonrpc: "2.0",
-		Method:  method,
-		Params:  params,
-	}
-
-	return json.NewEncoder(c.stdin).Encode(notif)
-}
-
-// SendBatchRequest sends multiple JSON-RPC requests as a batch
-func (c *StdioClient) SendBatchRequest(ctx context.Context, methods []string, params []interface{}) ([]types.Response, error) {
-	if len(methods) != len(params) {
-		return nil, fmt.Errorf("number of methods does not match number of parameters")
-	}
-
-	c.mu.Lock()
-	var requests []request
-	var respChannels []chan *types.Response
-
-	// Create requests and response channels
-	for i, method := range methods {
-		id := atomic.AddInt64(&c.nextID, 1)
-		requests = append(requests, request{
-			Jsonrpc: "2.0",
-			Method:  method,
-			Params:  params[i],
-			ID:      id,
-		})
-
-		// Create response channel for each request
-		respCh := make(chan *types.Response, 1)
-		c.respMu.Lock()
-		c.respReaders[id] = respCh
-		c.respMu.Unlock()
-		respChannels = append(respChannels, respCh)
-	}
-
-	// Send batch request
-	batch := batchRequest{Requests: requests}
-	if err := json.NewEncoder(c.stdin).Encode(batch); err != nil {
-		c.mu.Unlock()
-		return nil, fmt.Errorf("failed to encode batch request: %w", err)
-	}
-	c.mu.Unlock()
-
-	// Wait for all responses or context cancellation
-	responses := make([]types.Response, 0, len(requests))
-	for i, ch := range respChannels {
-		select {
-		case <-ctx.Done():
-			// Clean up remaining response channels
-			c.respMu.Lock()
-			for j := i; j < len(requests); j++ {
-				delete(c.respReaders, requests[j].ID)
-			}
-			c.respMu.Unlock()
-			return nil, ctx.Err()
-		case resp := <-ch:
-			if resp == nil {
-				return nil, fmt.Errorf("response channel closed before receiving response")
-			}
-			responses = append(responses, *resp)
-		}
-	}
-
-	return responses, nil
-}
-
-// ListResources implements the Client interface
-func (c *StdioClient) ListResources(ctx context.Context) ([]types.Resource, error) {
-	resp, err := c.SendRequest(ctx, "mcp/list_resources", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var result struct {
-		Resources []types.Resource `json:"resources"`
-	}
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal resources: %w", err)
-	}
-
-	return result.Resources, nil
-}
-
-// ListTools implements the Client interface
+// ListTools returns a list of available tools
 func (c *StdioClient) ListTools(ctx context.Context) ([]types.Tool, error) {
-	resp, err := c.SendRequest(ctx, "mcp/list_tools", nil)
+	resp, err := c.SendRequest(ctx, "tools/list", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -299,9 +71,9 @@ func (c *StdioClient) ListTools(ctx context.Context) ([]types.Tool, error) {
 	return result.Tools, nil
 }
 
-// ExecuteTool implements the Client interface
-func (c *StdioClient) ExecuteTool(ctx context.Context, call types.ToolCall) (*types.ToolResult, error) {
-	resp, err := c.SendRequest(ctx, "mcp/call_tool", call)
+// ExecuteTool executes a tool with the given parameters
+func (c *StdioClient) ExecuteTool(ctx context.Context, toolCall types.ToolCall) (*types.ToolResult, error) {
+	resp, err := c.SendRequest(ctx, "mcp/call_tool", toolCall)
 	if err != nil {
 		return nil, err
 	}
@@ -314,30 +86,109 @@ func (c *StdioClient) ExecuteTool(ctx context.Context, call types.ToolCall) (*ty
 	return &result, nil
 }
 
-// Close shuts down the client and cleans up resources
-func (c *StdioClient) Close() error {
-	select {
-	case <-c.done:
-		// Already closed
-		return nil
-	default:
-		close(c.done)
+// SendRequest sends a JSON-RPC request and returns the response
+func (c *StdioClient) SendRequest(ctx context.Context, method string, params interface{}) (*Response, error) {
+	id := atomic.AddInt64(&c.nextID, 1)
+
+	request := struct {
+		Jsonrpc string      `json:"jsonrpc"`
+		ID      int64       `json:"id"`
+		Method  string      `json:"method"`
+		Params  interface{} `json:"params,omitempty"`
+	}{
+		Jsonrpc: "2.0",
+		ID:      id,
+		Method:  method,
+		Params:  params,
 	}
 
-	if c.stdin != nil {
-		c.stdin.Close()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Log request JSON
+	requestJSON, _ := json.Marshal(request)
+	fmt.Fprintf(os.Stderr, "Sending request: %s\n", string(requestJSON))
+
+	if err := json.NewEncoder(c.stdin).Encode(request); err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	if c.stdout != nil {
-		c.stdout.Close()
-	}
-	if c.cmd != nil && c.cmd.Process != nil {
-		// Send interrupt signal first
-		if err := c.cmd.Process.Signal(os.Interrupt); err != nil {
-			// If interrupt fails, force kill
-			c.cmd.Process.Kill()
+
+	// Read response, skipping non-JSON lines
+	scanner := bufio.NewScanner(c.stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Log raw line for debugging
+		fmt.Fprintf(os.Stderr, "Received line: %s\n", line)
+		// Try to decode as JSON
+		var response Response
+		if err := json.Unmarshal([]byte(line), &response); err == nil {
+			// Found valid JSON response
+			fmt.Fprintf(os.Stderr, "Found valid JSON response\n")
+			if response.Error != nil {
+				return nil, response.Error
+			}
+			return &response, nil
 		}
-		// Wait for process to exit
-		c.cmd.Wait()
+		// Not JSON, treat as log message
+		fmt.Fprintf(os.Stderr, "Server log: %s\n", line)
 	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	return nil, fmt.Errorf("no valid JSON response received")
+}
+
+// SendNotification sends a JSON-RPC notification
+func (c *StdioClient) SendNotification(ctx context.Context, method string, params interface{}) error {
+	notification := struct {
+		Jsonrpc string      `json:"jsonrpc"`
+		Method  string      `json:"method"`
+		Params  interface{} `json:"params,omitempty"`
+	}{
+		Jsonrpc: "2.0",
+		Method:  method,
+		Params:  params,
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := json.NewEncoder(c.stdin).Encode(notification); err != nil {
+		return fmt.Errorf("failed to send notification: %w", err)
+	}
+
 	return nil
+}
+
+// Response represents a JSON-RPC response
+type Response struct {
+	Jsonrpc string          `json:"jsonrpc"`
+	ID      int64           `json:"id"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *types.MCPError `json:"error,omitempty"`
+}
+
+// Close implements the Client interface
+func (c *StdioClient) Close() error {
+	// Nothing to close for basic stdin/stdout
+	return nil
+}
+
+// ListResources returns a list of available resources
+func (c *StdioClient) ListResources(ctx context.Context) ([]types.Resource, error) {
+	resp, err := c.SendRequest(ctx, "resources/list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Resources []types.Resource `json:"resources"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal resources: %w", err)
+	}
+
+	return result.Resources, nil
 }

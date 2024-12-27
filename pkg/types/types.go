@@ -2,43 +2,63 @@ package types
 
 import (
 	"encoding/json"
+	"fmt"
 )
+
+// ClientCapabilities represents the capabilities of the client
+type ClientCapabilities struct {
+	Experimental map[string]interface{} `json:"experimental,omitempty"`
+	Sampling     map[string]interface{} `json:"sampling,omitempty"`
+	Roots        *RootsCapability       `json:"roots,omitempty"`
+	Tools        *ToolCapabilities      `json:"tools,omitempty"`
+}
+
+// ToolCapabilities represents the tool-related capabilities
+type ToolCapabilities struct {
+	SupportsProgress     bool `json:"supportsProgress,omitempty"`
+	SupportsCancellation bool `json:"supportsCancellation,omitempty"`
+}
+
+// RootsCapability represents the roots capability
+type RootsCapability struct {
+	ListChanged bool `json:"listChanged,omitempty"`
+}
+
+// InitializeParams represents the parameters for initialization
+type InitializeParams struct {
+	ProtocolVersion string             `json:"protocolVersion"`
+	Capabilities    ClientCapabilities `json:"capabilities"`
+	ClientInfo      ClientInfo         `json:"clientInfo"`
+}
+
+// ClientInfo represents information about the client
+type ClientInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// Tool represents a tool that can be executed
+type Tool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"inputSchema"`
+}
+
+// ToolCall represents a tool execution request
+type ToolCall struct {
+	Name       string                 `json:"name"`
+	Parameters map[string]interface{} `json:"parameters"`
+}
+
+// ToolResult represents the result of a tool execution
+type ToolResult struct {
+	Result json.RawMessage `json:"result"`
+}
 
 // Resource represents an MCP resource
 type Resource struct {
 	URI  string `json:"uri"`
 	Name string `json:"name"`
-}
-
-// Tool represents a callable tool provided by the server
-type Tool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
-}
-
-// ToolCall represents a request to execute a tool
-type ToolCall struct {
-	Name       string         `json:"name"`
-	Parameters map[string]any `json:"parameters"`
-}
-
-// ToolResult represents the result of a tool execution
-type ToolResult struct {
-	Result any       `json:"result"`
-	Error  *MCPError `json:"error,omitempty"`
-}
-
-// Message represents a message in the conversation
-type Message struct {
-	Role     string    `json:"role"`
-	Content  string    `json:"content"`
-	ToolCall *ToolCall `json:"tool_call,omitempty"`
-}
-
-// InitializationOptions represents options for initializing an MCP client or server
-type InitializationOptions struct {
-	// Add any initialization options here
 }
 
 // MCPError represents an error in the MCP protocol
@@ -48,44 +68,27 @@ type MCPError struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
-// Response represents a JSON-RPC response
-type Response struct {
-	Jsonrpc string          `json:"jsonrpc"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *MCPError       `json:"error,omitempty"`
-	ID      int64           `json:"id"`
-}
-
-func (e *MCPError) Error() string {
-	return e.Message
-}
-
-// Standard error codes
+// Error codes
 const (
-	ErrParseError     = -32700
+	ErrParse          = -32700
 	ErrInvalidRequest = -32600
 	ErrMethodNotFound = -32601
 	ErrInvalidParams  = -32602
 	ErrInternal       = -32603
 )
 
-// NewMCPError creates a new MCP error with the given code and message
+// Error implements the error interface
+func (e *MCPError) Error() string {
+	return fmt.Sprintf("MCP error %d: %s", e.Code, e.Message)
+}
+
+// NewMCPError creates a new MCPError
 func NewMCPError(code int, message string, data interface{}) *MCPError {
 	return &MCPError{
 		Code:    code,
 		Message: message,
 		Data:    data,
 	}
-}
-
-// ParseError creates a new parse error
-func ParseError(data interface{}) *MCPError {
-	return NewMCPError(ErrParseError, "Parse error", data)
-}
-
-// InvalidRequestError creates a new invalid request error
-func InvalidRequestError(data interface{}) *MCPError {
-	return NewMCPError(ErrInvalidRequest, "Invalid request", data)
 }
 
 // MethodNotFoundError creates a new method not found error

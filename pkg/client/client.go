@@ -7,72 +7,42 @@ import (
 	"github.com/RinardNick/go-mcp-sdk/pkg/types"
 )
 
-// Client represents an MCP client interface
+// Client represents an MCP client
 type Client interface {
-	// ListResources lists available resources from the server
-	ListResources(ctx context.Context) ([]types.Resource, error)
+	// Initialize sends the initialization request to the server
+	Initialize(ctx context.Context) error
 
-	// ListTools lists available tools from the server
+	// ListTools returns a list of available tools
 	ListTools(ctx context.Context) ([]types.Tool, error)
 
-	// ExecuteTool executes a tool on the server
+	// ExecuteTool executes a tool with the given parameters
 	ExecuteTool(ctx context.Context, call types.ToolCall) (*types.ToolResult, error)
 
-	// SendRequest sends a raw JSON-RPC request
-	SendRequest(ctx context.Context, method string, params interface{}) (*types.Response, error)
+	// ListResources returns a list of available resources
+	ListResources(ctx context.Context) ([]types.Resource, error)
 
-	// SendNotification sends a JSON-RPC notification (no response expected)
-	SendNotification(ctx context.Context, method string, params interface{}) error
-
-	// SendBatchRequest sends multiple JSON-RPC requests as a batch
-	SendBatchRequest(ctx context.Context, methods []string, params []interface{}) ([]types.Response, error)
-
-	// Close closes the client connection
+	// Close shuts down the client and cleans up resources
 	Close() error
 }
 
-// Session represents an MCP client session
+// Session represents an MCP session
 type Session struct {
 	reader io.Reader
 	writer io.Writer
 	client Client
-	tools  []types.Tool
 }
 
-// NewSession creates a new MCP client session
+// NewSession creates a new session with the given reader, writer, and client
 func NewSession(reader io.Reader, writer io.Writer, client Client) (*Session, error) {
-	session := &Session{
+	return &Session{
 		reader: reader,
 		writer: writer,
 		client: client,
-	}
-
-	// Initialize tools
-	tools, err := client.ListTools(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	session.tools = tools
-
-	return session, nil
+	}, nil
 }
 
-// ListResources lists available resources from the server
-func (s *Session) ListResources(ctx context.Context) ([]types.Resource, error) {
-	return s.client.ListResources(ctx)
-}
-
-// ExecuteTool executes a tool on the server
-func (s *Session) ExecuteTool(ctx context.Context, call types.ToolCall) (*types.ToolResult, error) {
-	return s.client.ExecuteTool(ctx, call)
-}
-
-// GetTools returns the available tools for this session
-func (s *Session) GetTools() []types.Tool {
-	return s.tools
-}
-
-// Close closes the session
-func (s *Session) Close() error {
-	return s.client.Close()
+// Run starts the session
+func (s *Session) Run(ctx context.Context) error {
+	// TODO: Implement session handling
+	return nil
 }
