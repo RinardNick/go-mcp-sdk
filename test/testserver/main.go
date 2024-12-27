@@ -36,27 +36,38 @@ func handleRequest(req request) *types.Response {
 	switch req.Method {
 	case "mcp/list_tools":
 		log.Printf("Handling list_tools request")
-		result := map[string]interface{}{
-			"tools": []types.Tool{
-				{
-					Name:        "test_tool",
-					Description: "A test tool",
-					Parameters: map[string]any{
-						"param1": map[string]any{
-							"type":        "string",
-							"description": "A test parameter",
-						},
-					},
+		inputSchema := map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"param1": map[string]interface{}{
+					"type":        "string",
+					"description": "A test parameter",
 				},
 			},
+			"required": []string{"param1"},
+		}
+		schemaBytes, err := types.NewToolInputSchema(inputSchema)
+		if err != nil {
+			resp.Error = types.InternalError(err)
+			return resp
+		}
+		tools := []types.Tool{
+			{
+				Name:        "test_tool",
+				Description: "A test tool",
+				InputSchema: schemaBytes,
+			},
+		}
+		result := map[string]interface{}{
+			"tools": tools,
 		}
 		resultBytes, err := json.Marshal(result)
 		if err != nil {
-			resp.Error = types.InternalError(fmt.Sprintf("failed to marshal result: %v", err))
-			break
+			resp.Error = types.InternalError(err)
+			return resp
 		}
-		resp.Result = json.RawMessage(resultBytes)
-		log.Printf("List tools response: %+v", resp)
+		resp.Result = resultBytes
+		return resp
 
 	case "mcp/list_resources":
 		log.Printf("Handling list_resources request")
@@ -90,17 +101,19 @@ func handleRequest(req request) *types.Response {
 				break
 			}
 
-			result := types.ToolResult{
-				Result: map[string]interface{}{
-					"output": "test output",
-				},
+			result, err := types.NewToolResult(map[string]interface{}{
+				"output": "test output",
+			})
+			if err != nil {
+				resp.Error = types.InternalError(err.Error())
+				break
 			}
 			resultBytes, err := json.Marshal(result)
 			if err != nil {
-				resp.Error = types.InternalError(fmt.Sprintf("failed to marshal result: %v", err))
+				resp.Error = types.InternalError(err.Error())
 				break
 			}
-			resp.Result = json.RawMessage(resultBytes)
+			resp.Result = resultBytes
 		} else {
 			resp.Error = types.MethodNotFoundError(fmt.Sprintf("Unknown tool: %s", toolCall.Name))
 		}

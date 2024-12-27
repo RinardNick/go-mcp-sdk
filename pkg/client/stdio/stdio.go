@@ -31,6 +31,7 @@ func NewClient(stdin io.Writer, stdout io.Reader) *StdioClient {
 
 // Initialize sends the initialization request to the server
 func (c *StdioClient) Initialize(ctx context.Context) error {
+	fmt.Fprintf(os.Stderr, "Initializing MCP client...\n")
 	params := &types.InitializeParams{
 		ProtocolVersion: "0.1.0",
 		ClientInfo: types.ClientInfo{
@@ -45,13 +46,23 @@ func (c *StdioClient) Initialize(ctx context.Context) error {
 		},
 	}
 
-	_, err := c.SendRequest(ctx, "initialize", params)
+	fmt.Fprintf(os.Stderr, "Sending initialize request with params: %+v\n", params)
+	resp, err := c.SendRequest(ctx, "initialize", params)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Initialization failed: %v\n", err)
 		return fmt.Errorf("initialization failed: %w", err)
 	}
+	fmt.Fprintf(os.Stderr, "Initialize response: %+v\n", resp)
 
 	// Send initialized notification
-	return c.SendNotification(ctx, "initialized", nil)
+	fmt.Fprintf(os.Stderr, "Sending initialized notification...\n")
+	err = c.SendNotification(ctx, "notifications/initialized", nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to send initialized notification: %v\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "Initialized notification sent successfully\n")
+	}
+	return err
 }
 
 // ListTools returns a list of available tools
@@ -73,17 +84,41 @@ func (c *StdioClient) ListTools(ctx context.Context) ([]types.Tool, error) {
 
 // ExecuteTool executes a tool with the given parameters
 func (c *StdioClient) ExecuteTool(ctx context.Context, toolCall types.ToolCall) (*types.ToolResult, error) {
-	resp, err := c.SendRequest(ctx, "mcp/call_tool", toolCall)
+	params := struct {
+		Name       string                 `json:"name"`
+		Parameters map[string]interface{} `json:"parameters"`
+	}{
+		Name:       toolCall.Name,
+		Parameters: toolCall.Parameters,
+	}
+
+	resp, err := c.SendRequest(ctx, "tools/call", params)
 	if err != nil {
 		return nil, err
 	}
 
-	var result types.ToolResult
+	var result struct {
+		Content []struct {
+			Type    string `json:"type"`
+			Text    string `json:"text"`
+			IsError bool   `json:"isError"`
+		} `json:"content"`
+	}
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal tool result: %w", err)
 	}
 
-	return &result, nil
+	if len(result.Content) == 0 {
+		return nil, fmt.Errorf("empty response from server")
+	}
+
+	if result.Content[0].IsError {
+		return nil, fmt.Errorf("tool execution failed: %s", result.Content[0].Text)
+	}
+
+	return &types.ToolResult{
+		Result: resp.Result,
+	}, nil
 }
 
 // SendRequest sends a JSON-RPC request and returns the response

@@ -44,6 +44,15 @@ type Tool struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 
+// NewToolInputSchema creates a new json.RawMessage from a map
+func NewToolInputSchema(schema map[string]interface{}) (json.RawMessage, error) {
+	bytes, err := json.Marshal(schema)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(bytes), nil
+}
+
 // ToolCall represents a tool execution request
 type ToolCall struct {
 	Name       string                 `json:"name"`
@@ -53,6 +62,18 @@ type ToolCall struct {
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
 	Result json.RawMessage `json:"result"`
+	Error  *MCPError       `json:"error,omitempty"`
+}
+
+// NewToolResult creates a new ToolResult from a map
+func NewToolResult(result map[string]interface{}) (*ToolResult, error) {
+	bytes, err := json.Marshal(result)
+	if err != nil {
+		return nil, err
+	}
+	return &ToolResult{
+		Result: json.RawMessage(bytes),
+	}, nil
 }
 
 // Resource represents an MCP resource
@@ -104,4 +125,27 @@ func InvalidParamsError(data interface{}) *MCPError {
 // InternalError creates a new internal error
 func InternalError(data interface{}) *MCPError {
 	return NewMCPError(ErrInternal, "Internal error", data)
+}
+
+// Response represents a JSON-RPC response
+type Response struct {
+	Jsonrpc string          `json:"jsonrpc"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *MCPError       `json:"error,omitempty"`
+	ID      interface{}     `json:"id"`
+}
+
+// ParseError represents a JSON parsing error
+type ParseError struct {
+	Code    int         `json:"code"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
+}
+
+func NewParseError(message string, data interface{}) *MCPError {
+	return NewMCPError(ErrParse, message, data)
+}
+
+func (e *ParseError) Error() string {
+	return fmt.Sprintf("Parse error: %s", e.Message)
 }

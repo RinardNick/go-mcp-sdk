@@ -211,7 +211,7 @@ func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
 			ID      int64           `json:"id"`
 		}
 		if err := json.Unmarshal(message, &req); err != nil {
-			t.writeJSONRPCError(conn, &req.ID, types.ParseError("failed to decode request"))
+			t.writeJSONRPCError(conn, &req.ID, types.NewParseError("failed to decode request", err))
 			continue
 		}
 

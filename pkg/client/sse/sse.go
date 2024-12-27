@@ -325,3 +325,23 @@ func (c *SSEClient) SendRequest(ctx context.Context, method string, params inter
 		ID:      resp.ID,
 	}, nil
 }
+
+// Initialize sends the initialization request to the server
+func (c *SSEClient) Initialize(ctx context.Context) error {
+	params := types.InitializeParams{
+		ProtocolVersion: "0.1.0",
+		ClientInfo: types.ClientInfo{
+			Name:    "go-mcp-sdk",
+			Version: "0.1.0",
+		},
+		Capabilities: types.ClientCapabilities{
+			Tools: &types.ToolCapabilities{
+				SupportsProgress:     true,
+				SupportsCancellation: true,
+			},
+		},
+	}
+
+	_, err := c.sendRequest(ctx, "initialize", params)
+	return err
+}

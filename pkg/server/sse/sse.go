@@ -165,7 +165,7 @@ func (t *Transport) handleRPC(w http.ResponseWriter, r *http.Request) {
 		ID      int64           `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONRPCError(w, &req.ID, types.ParseError("failed to decode request"))
+		writeJSONRPCError(w, &req.ID, types.NewParseError("failed to decode request", err))
 		return
 	}
 

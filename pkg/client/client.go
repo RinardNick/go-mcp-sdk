@@ -2,7 +2,9 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"os"
 
 	"github.com/RinardNick/go-mcp-sdk/pkg/types"
 )
@@ -34,15 +36,39 @@ type Session struct {
 
 // NewSession creates a new session with the given reader, writer, and client
 func NewSession(reader io.Reader, writer io.Writer, client Client) (*Session, error) {
-	return &Session{
+	session := &Session{
 		reader: reader,
 		writer: writer,
 		client: client,
-	}, nil
+	}
+
+	// Initialize the client
+	ctx := context.Background()
+	if err := client.Initialize(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize client: %w", err)
+	}
+
+	return session, nil
 }
 
 // Run starts the session
 func (s *Session) Run(ctx context.Context) error {
 	// TODO: Implement session handling
 	return nil
+}
+
+// GetTools returns a list of available tools
+func (s *Session) GetTools() []types.Tool {
+	ctx := context.Background()
+	tools, err := s.client.ListTools(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to list tools: %v\n", err)
+		return nil
+	}
+	return tools
+}
+
+// ExecuteTool executes a tool with the given parameters
+func (s *Session) ExecuteTool(ctx context.Context, call types.ToolCall) (*types.ToolResult, error) {
+	return s.client.ExecuteTool(ctx, call)
 }

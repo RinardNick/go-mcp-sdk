@@ -29,6 +29,23 @@ func TestSSEClient(t *testing.T) {
 
 			switch req.Method {
 			case "mcp/list_tools":
+				// Create tool input schema
+				inputSchema := map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"param1": map[string]interface{}{
+							"type":        "string",
+							"description": "A test parameter",
+						},
+					},
+					"required": []string{"param1"},
+				}
+				schemaBytes, err := types.NewToolInputSchema(inputSchema)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"jsonrpc": "2.0",
 					"id":      1,
@@ -37,12 +54,7 @@ func TestSSEClient(t *testing.T) {
 							{
 								Name:        "test_tool",
 								Description: "A test tool",
-								Parameters: map[string]any{
-									"param1": map[string]any{
-										"type":        "string",
-										"description": "A test parameter",
-									},
-								},
+								InputSchema: schemaBytes,
 							},
 						},
 					},
@@ -63,14 +75,18 @@ func TestSSEClient(t *testing.T) {
 				})
 
 			case "mcp/call_tool":
+				result, err := types.NewToolResult(map[string]interface{}{
+					"output": "test output",
+				})
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"jsonrpc": "2.0",
 					"id":      1,
-					"result": types.ToolResult{
-						Result: map[string]interface{}{
-							"output": "test output",
-						},
-					},
+					"result":  result,
 				})
 			}
 
@@ -150,7 +166,12 @@ func TestSSEClient(t *testing.T) {
 			t.Fatalf("ExecuteTool failed: %v", err)
 		}
 
-		output, ok := result.Result.(map[string]interface{})["output"].(string)
+		var resultMap map[string]interface{}
+		if err := json.Unmarshal(result.Result, &resultMap); err != nil {
+			t.Fatalf("Failed to unmarshal result: %v", err)
+		}
+
+		output, ok := resultMap["output"].(string)
 		if !ok {
 			t.Fatal("Expected string output in result")
 		}

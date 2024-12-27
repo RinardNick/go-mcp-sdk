@@ -81,26 +81,34 @@ func TestWebSocketTransportConcurrentClients(t *testing.T) {
 	s := server.NewServer(nil)
 
 	// Register test tool
-	tool := types.Tool{
-		Name:        "test_tool",
-		Description: "A test tool",
-		Parameters: map[string]any{
-			"param1": map[string]any{
+	inputSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"param1": map[string]interface{}{
 				"type":        "string",
 				"description": "A test parameter",
 			},
 		},
+		"required": []string{"param1"},
+	}
+	schemaBytes, err := types.NewToolInputSchema(inputSchema)
+	if err != nil {
+		t.Fatalf("Failed to create input schema: %v", err)
+	}
+
+	tool := types.Tool{
+		Name:        "test_tool",
+		Description: "A test tool",
+		InputSchema: schemaBytes,
 	}
 	if err := s.RegisterTool(tool); err != nil {
 		t.Fatalf("Failed to register tool: %v", err)
 	}
 
 	handler := func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
-		return &types.ToolResult{
-			Result: map[string]interface{}{
-				"output": params["param1"],
-			},
-		}, nil
+		return types.NewToolResult(map[string]interface{}{
+			"output": params["param1"],
+		})
 	}
 	if err := s.RegisterToolHandler("test_tool", handler); err != nil {
 		t.Fatalf("Failed to register handler: %v", err)
@@ -166,13 +174,13 @@ func TestWebSocketTransportConcurrentClients(t *testing.T) {
 				}
 
 				// Verify response
-				var result types.ToolResult
+				var result map[string]interface{}
 				if err := json.Unmarshal(resp.Result, &result); err != nil {
 					t.Errorf("Client %d failed to unmarshal result: %v", clientID, err)
 					return
 				}
 
-				output, ok := result.Result.(map[string]interface{})["output"]
+				output, ok := result["output"]
 				if !ok {
 					t.Errorf("Client %d: Expected output in result", clientID)
 					return
@@ -186,4 +194,77 @@ func TestWebSocketTransportConcurrentClients(t *testing.T) {
 
 		wg.Wait()
 	})
+}
+
+func TestWSServer(t *testing.T) {
+	// Create test server
+	s := server.NewServer(&server.InitializationOptions{
+		Version: "1.0",
+		Capabilities: map[string]interface{}{
+			"tools":     true,
+			"resources": true,
+		},
+	})
+
+	// Add test tool
+	inputSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"param1": map[string]interface{}{
+				"type":        "string",
+				"description": "A test parameter",
+			},
+		},
+		"required": []string{"param1"},
+	}
+	schemaBytes, err := types.NewToolInputSchema(inputSchema)
+	if err != nil {
+		t.Fatalf("Failed to create input schema: %v", err)
+	}
+
+	err = s.RegisterTool(types.Tool{
+		Name:        "test_tool",
+		Description: "A test tool",
+		InputSchema: schemaBytes,
+	})
+	if err != nil {
+		t.Fatalf("Failed to register tool: %v", err)
+	}
+
+	// Register tool handler
+	err = s.RegisterToolHandler("test_tool", func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
+		result, err := types.NewToolResult(map[string]interface{}{
+			"output": "test output",
+		})
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	})
+	if err != nil {
+		t.Fatalf("Failed to register tool handler: %v", err)
+	}
+
+	// Test tool call
+	toolCall := types.ToolCall{
+		Name: "test_tool",
+		Parameters: map[string]interface{}{
+			"param1": "test value",
+		},
+	}
+
+	result, err := s.HandleToolCall(context.Background(), toolCall)
+	if err != nil {
+		t.Fatalf("Failed to handle tool call: %v", err)
+	}
+
+	// Check result
+	var resultMap map[string]interface{}
+	if err := json.Unmarshal(result.Result, &resultMap); err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+
+	if resultMap["output"] != "test output" {
+		t.Errorf("Expected output 'test output', got %v", resultMap["output"])
+	}
 }

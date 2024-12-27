@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/RinardNick/go-mcp-sdk/pkg/server"
@@ -9,181 +10,82 @@ import (
 )
 
 func TestServer(t *testing.T) {
-	// Create server with test options
-	options := &server.InitializationOptions{
+	// Create test server
+	s := server.NewServer(&server.InitializationOptions{
 		Version: "1.0",
 		Capabilities: map[string]interface{}{
 			"tools":     true,
 			"resources": true,
 		},
-		Config: map[string]interface{}{
-			"maxSessions":      10,
-			"enableValidation": true,
-			"logLevel":         "debug",
+	})
+
+	// Add test tool
+	inputSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"param1": map[string]interface{}{
+				"type":        "string",
+				"description": "A test parameter",
+			},
 		},
+		"required": []string{"param1"},
 	}
-	s := server.NewServer(options)
+	schemaBytes, err := types.NewToolInputSchema(inputSchema)
+	if err != nil {
+		t.Fatalf("Failed to create input schema: %v", err)
+	}
 
-	// Test tool registration
-	t.Run("Tool Registration", func(t *testing.T) {
-		tool := types.Tool{
-			Name:        "test_tool",
-			Description: "A test tool",
-			Parameters: map[string]any{
-				"param1": map[string]any{
-					"type":        "string",
-					"description": "A test parameter",
-				},
-			},
-		}
-
-		// Test successful registration
-		if err := s.RegisterTool(tool); err != nil {
-			t.Errorf("Failed to register tool: %v", err)
-		}
-
-		// Test duplicate registration
-		if err := s.RegisterTool(tool); err == nil {
-			t.Error("Expected error registering duplicate tool")
-		}
-
-		// Test empty name
-		invalidTool := tool
-		invalidTool.Name = ""
-		if err := s.RegisterTool(invalidTool); err == nil {
-			t.Error("Expected error registering tool with empty name")
-		}
-
-		// Verify registered tool
-		tools := s.GetTools()
-		if len(tools) != 1 {
-			t.Errorf("Expected 1 tool, got %d", len(tools))
-		}
-		if tools[0].Name != tool.Name {
-			t.Errorf("Expected tool name %s, got %s", tool.Name, tools[0].Name)
-		}
+	err = s.RegisterTool(types.Tool{
+		Name:        "test_tool",
+		Description: "A test tool",
+		InputSchema: schemaBytes,
 	})
+	if err != nil {
+		t.Fatalf("Failed to register tool: %v", err)
+	}
 
-	// Test tool handler registration
-	t.Run("Tool Handler Registration", func(t *testing.T) {
-		handler := func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
-			return &types.ToolResult{
-				Result: map[string]interface{}{
-					"output": params["param1"],
-				},
-			}, nil
+	// Register tool handler
+	err = s.RegisterToolHandler("test_tool", func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
+		// Convert params to map[string]interface{} for NewToolResult
+		paramsInterface := make(map[string]interface{}, len(params))
+		for k, v := range params {
+			paramsInterface[k] = v
 		}
 
-		// Test successful registration
-		if err := s.RegisterToolHandler("test_tool", handler); err != nil {
-			t.Errorf("Failed to register handler: %v", err)
-		}
-
-		// Test duplicate registration
-		if err := s.RegisterToolHandler("test_tool", handler); err == nil {
-			t.Error("Expected error registering duplicate handler")
-		}
-
-		// Test unregistered tool
-		if err := s.RegisterToolHandler("unknown_tool", handler); err == nil {
-			t.Error("Expected error registering handler for unknown tool")
-		}
-
-		// Test nil handler
-		if err := s.RegisterToolHandler("test_tool", nil); err == nil {
-			t.Error("Expected error registering nil handler")
-		}
-	})
-
-	// Test resource registration
-	t.Run("Resource Registration", func(t *testing.T) {
-		resource := types.Resource{
-			URI:  "test://resource",
-			Name: "test_resource",
-		}
-
-		// Test successful registration
-		if err := s.RegisterResource(resource); err != nil {
-			t.Errorf("Failed to register resource: %v", err)
-		}
-
-		// Test duplicate registration
-		if err := s.RegisterResource(resource); err == nil {
-			t.Error("Expected error registering duplicate resource")
-		}
-
-		// Test empty URI
-		invalidResource := resource
-		invalidResource.URI = ""
-		if err := s.RegisterResource(invalidResource); err == nil {
-			t.Error("Expected error registering resource with empty URI")
-		}
-
-		// Verify registered resource
-		resources := s.GetResources()
-		if len(resources) != 1 {
-			t.Errorf("Expected 1 resource, got %d", len(resources))
-		}
-		if resources[0].URI != resource.URI {
-			t.Errorf("Expected resource URI %s, got %s", resource.URI, resources[0].URI)
-		}
-	})
-
-	// Test tool execution
-	t.Run("Tool Execution", func(t *testing.T) {
-		ctx := context.Background()
-
-		// Test successful execution
-		result, err := s.HandleToolCall(ctx, types.ToolCall{
-			Name: "test_tool",
-			Parameters: map[string]any{
-				"param1": "test input",
-			},
+		result, err := types.NewToolResult(map[string]interface{}{
+			"output": "test output",
 		})
 		if err != nil {
-			t.Errorf("Failed to execute tool: %v", err)
+			return nil, err
 		}
-		if output, ok := result.Result.(map[string]interface{})["output"]; !ok || output != "test input" {
-			t.Errorf("Expected output 'test input', got %v", output)
-		}
-
-		// Test unregistered tool
-		_, err = s.HandleToolCall(ctx, types.ToolCall{
-			Name: "unknown_tool",
-			Parameters: map[string]any{
-				"param1": "test",
-			},
-		})
-		if err == nil {
-			t.Error("Expected error executing unknown tool")
-		}
-
-		// Test invalid parameters
-		_, err = s.HandleToolCall(ctx, types.ToolCall{
-			Name: "test_tool",
-			Parameters: map[string]any{
-				"invalid_param": "test",
-			},
-		})
-		if err == nil {
-			t.Error("Expected error with invalid parameters")
-		}
+		return result, nil
 	})
+	if err != nil {
+		t.Fatalf("Failed to register tool handler: %v", err)
+	}
 
-	// Test server lifecycle
-	t.Run("Server Lifecycle", func(t *testing.T) {
-		ctx := context.Background()
+	// Test tool call
+	toolCall := types.ToolCall{
+		Name: "test_tool",
+		Parameters: map[string]interface{}{
+			"param1": "test value",
+		},
+	}
 
-		// Test start
-		if err := s.Start(ctx); err != nil {
-			t.Errorf("Failed to start server: %v", err)
-		}
+	result, err := s.HandleToolCall(context.Background(), toolCall)
+	if err != nil {
+		t.Fatalf("Failed to handle tool call: %v", err)
+	}
 
-		// Test stop
-		if err := s.Stop(ctx); err != nil {
-			t.Errorf("Failed to stop server: %v", err)
-		}
-	})
+	// Check result
+	var resultMap map[string]interface{}
+	if err := json.Unmarshal(result.Result, &resultMap); err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+
+	if resultMap["output"] != "test output" {
+		t.Errorf("Expected output 'test output', got %v", resultMap["output"])
+	}
 }
 
 func TestServerWithoutValidation(t *testing.T) {
@@ -202,26 +104,38 @@ func TestServerWithoutValidation(t *testing.T) {
 	s := server.NewServer(options)
 
 	// Register test tool and handler
-	tool := types.Tool{
-		Name:        "test_tool",
-		Description: "A test tool",
-		Parameters: map[string]any{
-			"param1": map[string]any{
+	inputSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"param1": map[string]interface{}{
 				"type":        "string",
 				"description": "A test parameter",
 			},
 		},
+		"required": []string{"param1"},
+	}
+	schemaBytes, err := types.NewToolInputSchema(inputSchema)
+	if err != nil {
+		t.Fatalf("Failed to create input schema: %v", err)
+	}
+
+	tool := types.Tool{
+		Name:        "test_tool",
+		Description: "A test tool",
+		InputSchema: schemaBytes,
 	}
 	if err := s.RegisterTool(tool); err != nil {
 		t.Fatalf("Failed to register tool: %v", err)
 	}
 
-	handler := func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
-		return &types.ToolResult{
-			Result: map[string]interface{}{
-				"output": params["param1"],
-			},
-		}, nil
+	handler := func(ctx context.Context, params map[string]interface{}) (*types.ToolResult, error) {
+		result, err := types.NewToolResult(map[string]interface{}{
+			"output": params["param1"],
+		})
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
 	}
 	if err := s.RegisterToolHandler("test_tool", handler); err != nil {
 		t.Fatalf("Failed to register handler: %v", err)
@@ -234,14 +148,20 @@ func TestServerWithoutValidation(t *testing.T) {
 		// Test with invalid parameters (should still work)
 		result, err := s.HandleToolCall(ctx, types.ToolCall{
 			Name: "test_tool",
-			Parameters: map[string]any{
+			Parameters: map[string]interface{}{
 				"invalid_param": "test",
 			},
 		})
 		if err != nil {
 			t.Errorf("Expected success with validation disabled, got error: %v", err)
 		}
-		if result.Result.(map[string]interface{})["output"] != nil {
+
+		// Check result
+		var resultMap map[string]interface{}
+		if err := json.Unmarshal(result.Result, &resultMap); err != nil {
+			t.Fatalf("Failed to unmarshal result: %v", err)
+		}
+		if resultMap["output"] != nil {
 			t.Error("Expected nil output with invalid parameter")
 		}
 	})

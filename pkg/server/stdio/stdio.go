@@ -77,28 +77,24 @@ func (t *Transport) readLoop(ctx context.Context) {
 		case <-t.done:
 			return
 		default:
-			var rawMsg json.RawMessage
-			if err := decoder.Decode(&rawMsg); err != nil {
+			var req Request
+			if err := decoder.Decode(&req); err != nil {
 				if err == io.EOF {
 					t.logger.Println("Client closed connection")
 					return
 				}
-				t.logger.Printf("Error decoding request: %v", err)
+				t.writeResponse(&types.Response{
+					Jsonrpc: "2.0",
+					Error:   types.NewParseError("failed to decode request", err),
+				})
 				continue
 			}
 
 			// Try to decode as batch request
 			var batch BatchRequest
-			if err := json.Unmarshal(rawMsg, &batch); err == nil && len(batch.Requests) > 0 {
+			if err := json.Unmarshal(req.Params, &batch); err == nil && len(batch.Requests) > 0 {
 				t.logger.Printf("Received batch request with %d requests", len(batch.Requests))
 				t.handleBatchRequest(ctx, batch)
-				continue
-			}
-
-			// Try single request
-			var req Request
-			if err := json.Unmarshal(rawMsg, &req); err != nil {
-				t.logger.Printf("Error decoding single request: %v", err)
 				continue
 			}
 

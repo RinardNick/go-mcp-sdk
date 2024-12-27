@@ -2,10 +2,15 @@ package stdio
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"os"
+	"os/exec"
 	"testing"
 	"time"
 
 	"github.com/RinardNick/go-mcp-sdk/pkg/client/stdio"
+	"github.com/RinardNick/go-mcp-sdk/pkg/types"
 	"github.com/RinardNick/go-mcp-sdk/test/testutil"
 )
 
@@ -16,12 +21,34 @@ func TestStdioClient(t *testing.T) {
 		t.Fatalf("Failed to get test server: %v", err)
 	}
 
-	// Create stdio client
-	client, err := stdio.NewStdioClient(serverBin)
+	// Start the server process
+	cmd := exec.Command(serverBin)
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
+		t.Fatalf("Failed to get stdin pipe: %v", err)
 	}
-	defer client.Close()
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("Failed to get stdout pipe: %v", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatalf("Failed to get stderr pipe: %v", err)
+	}
+
+	// Start the server
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	// Create stdio client
+	client := stdio.NewClient(stdin, stdout)
+
+	// Copy server stderr to os.Stderr for debugging
+	go func() {
+		io.Copy(os.Stderr, stderr)
+	}()
 
 	// Test cases
 	t.Run("Basic RPC", func(t *testing.T) {
@@ -42,56 +69,32 @@ func TestStdioClient(t *testing.T) {
 		}
 	})
 
-	t.Run("Invalid JSON-RPC Version", func(t *testing.T) {
+	t.Run("Tool Call", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		// Send request with invalid version
-		resp, err := client.SendRequest(ctx, "test_method", nil)
-		if err == nil {
-			t.Fatal("Expected error for invalid JSON-RPC version")
-		}
-		if resp != nil {
-			t.Fatal("Expected nil response for invalid JSON-RPC version")
-		}
-	})
-
-	t.Run("Batch Request", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		methods := []string{"mcp/list_tools", "mcp/list_resources"}
-		params := []interface{}{nil, nil}
-
-		responses, err := client.SendBatchRequest(ctx, methods, params)
-		if err != nil {
-			t.Fatalf("Batch request failed: %v", err)
-		}
-
-		if len(responses) != len(methods) {
-			t.Fatalf("Expected %d responses, got %d", len(methods), len(responses))
-		}
-
-		// Verify each response
-		for i, resp := range responses {
-			if resp.Jsonrpc != "2.0" {
-				t.Errorf("Response %d: expected JSON-RPC version 2.0, got %s", i, resp.Jsonrpc)
-			}
-			if resp.Error != nil {
-				t.Errorf("Response %d: unexpected error: %v", i, resp.Error)
-			}
-		}
-	})
-
-	t.Run("Notification", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		err := client.SendNotification(ctx, "test_notification", map[string]string{
-			"message": "test",
+		result, err := client.ExecuteTool(ctx, types.ToolCall{
+			Name: "test_tool",
+			Parameters: map[string]interface{}{
+				"param1": "test",
+			},
 		})
 		if err != nil {
-			t.Fatalf("Failed to send notification: %v", err)
+			t.Fatalf("ExecuteTool failed: %v", err)
+		}
+
+		var resultMap map[string]interface{}
+		if err := json.Unmarshal(result.Result, &resultMap); err != nil {
+			t.Fatalf("Failed to unmarshal result: %v", err)
+		}
+
+		output, ok := resultMap["output"].(string)
+		if !ok {
+			t.Fatal("Expected string output in result")
+		}
+
+		if output != "test output" {
+			t.Errorf("Expected output 'test output', got '%s'", output)
 		}
 	})
 

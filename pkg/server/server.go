@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -199,7 +200,11 @@ func (s *BaseServer) HandleToolCall(ctx context.Context, call types.ToolCall) (*
 	}
 
 	if s.config.EnableValidation {
-		if err := validation.ValidateParameters(call.Parameters, tool.Parameters); err != nil {
+		var schema map[string]interface{}
+		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+			return nil, types.InvalidParamsError(fmt.Sprintf("invalid schema: %v", err))
+		}
+		if err := validation.ValidateParameters(call.Parameters, schema); err != nil {
 			return nil, types.InvalidParamsError(err.Error())
 		}
 	}
