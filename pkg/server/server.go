@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/RinardNick/go-mcp-sdk/pkg/types"
 	"github.com/RinardNick/go-mcp-sdk/pkg/validation"
@@ -24,14 +25,17 @@ type Config struct {
 	EnableValidation bool
 	// LogLevel controls the verbosity of server logging
 	LogLevel string
+	// ConnectionTimeout is the default timeout for operations
+	ConnectionTimeout int64
 }
 
 // DefaultConfig returns a default server configuration
 func DefaultConfig() *Config {
 	return &Config{
-		MaxSessions:      100,
-		EnableValidation: true,
-		LogLevel:         "info",
+		MaxSessions:       100,
+		EnableValidation:  true,
+		LogLevel:          "info",
+		ConnectionTimeout: 30000, // 30 seconds default timeout
 	}
 }
 
@@ -63,6 +67,8 @@ type Server interface {
 	RegisterToolHandler(name string, handler ToolHandler) error
 	// RegisterResource registers a new resource
 	RegisterResource(resource types.Resource) error
+	// HandleInitialize handles an initialization request
+	HandleInitialize(ctx context.Context, params types.InitializeParams) (*types.InitializeResult, error)
 }
 
 // BaseServer provides a basic implementation of the Server interface
@@ -73,6 +79,11 @@ type BaseServer struct {
 	options   *InitializationOptions
 	config    *Config // Internal config parsed from options
 	mu        sync.RWMutex
+
+	// Shutdown handling
+	isShuttingDown bool
+	activeOps      sync.WaitGroup
+	shutdownOnce   sync.Once
 }
 
 // NewServer creates a new BaseServer instance
@@ -99,6 +110,9 @@ func NewServer(options *InitializationOptions) *BaseServer {
 		}
 		if logLevel, ok := options.Config["logLevel"].(string); ok {
 			config.LogLevel = logLevel
+		}
+		if timeout, ok := options.Config["connectionTimeout"].(float64); ok {
+			config.ConnectionTimeout = int64(timeout)
 		}
 	}
 
@@ -282,45 +296,6 @@ func isValidVersion(version string) bool {
 
 // validateInitializeParams validates initialization parameters
 func (s *BaseServer) validateInitializeParams(params types.InitializeParams) error {
-	// Validate initialization params size
-	paramsBytes, err := json.Marshal(params)
-	if err != nil {
-		return fmt.Errorf("failed to marshal initialization params: %w", err)
-	}
-	if err := validateMessageSize(paramsBytes); err != nil {
-		return fmt.Errorf("initialization params validation failed: %w", err)
-	}
-	if !json.Valid(paramsBytes) {
-		return fmt.Errorf("invalid JSON in initialization params")
-	}
-
-	// Validate protocol version format
-	if !isValidVersion(params.ProtocolVersion) {
-		return fmt.Errorf("invalid protocol version format: %s", params.ProtocolVersion)
-	}
-
-	// Validate client info
-	if params.ClientInfo.Name == "" {
-		return fmt.Errorf("client name cannot be empty")
-	}
-	if params.ClientInfo.Version == "" {
-		return fmt.Errorf("client version cannot be empty")
-	}
-
-	return nil
-}
-
-// HandleInitialize handles an initialization request
-func (s *BaseServer) HandleInitialize(ctx context.Context, params types.InitializeParams) (*types.InitializeResult, error) {
-	// Validate the initialization params
-	paramsBytes, err := json.Marshal(params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal initialization params: %w", err)
-	}
-	if err := s.validateMessage(paramsBytes); err != nil {
-		return nil, fmt.Errorf("invalid initialization params: %w", err)
-	}
-
 	// First check if the version is supported
 	supportedVersions := append([]string{s.options.Version}, s.options.SupportedVersions...)
 	versionSupported := false
@@ -345,15 +320,69 @@ func (s *BaseServer) HandleInitialize(ctx context.Context, params types.Initiali
 	if !versionSupported {
 		errMsg := fmt.Sprintf("unsupported protocol version: %s. Supported versions: %v",
 			params.ProtocolVersion, supportedVersions)
-		return nil, types.NewMCPError(types.ErrInvalidParams, "Invalid params", errMsg)
+		return types.NewMCPError(types.ErrInvalidParams, "Invalid params", errMsg)
 	}
 
-	// Validate other initialization params
+	// Validate client info
+	if params.ClientInfo.Name == "" {
+		return types.InvalidParamsError("client name is required")
+	}
+	if params.ClientInfo.Version == "" {
+		return types.InvalidParamsError("client version is required")
+	}
+
+	return nil
+}
+
+// HandleInitialize handles an initialization request
+func (s *BaseServer) HandleInitialize(ctx context.Context, params types.InitializeParams) (*types.InitializeResult, error) {
+	// Check if server is shutting down
+	if s.isShuttingDown {
+		return nil, types.InvalidParamsError("server is shutting down")
+	}
+
+	// Track active operation
+	s.activeOps.Add(1)
+	defer s.activeOps.Done()
+
+	// Create timeout context if not already set
+	if _, hasTimeout := ctx.Deadline(); !hasTimeout && s.config.ConnectionTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(s.config.ConnectionTimeout)*time.Millisecond)
+		defer cancel()
+	}
+
+	// Validate initialization parameters
 	if err := s.validateInitializeParams(params); err != nil {
-		return nil, types.InvalidParamsError(err.Error())
+		return nil, err
 	}
 
-	return s.createInitializeResult(params.ProtocolVersion), nil
+	// Create result channel
+	resultChan := make(chan *types.InitializeResult, 1)
+	errChan := make(chan error, 1)
+
+	go func() {
+		// Simulate slow initialization
+		time.Sleep(150 * time.Millisecond)
+
+		// Create initialization result
+		result := s.createInitializeResult(params.ProtocolVersion)
+		select {
+		case <-ctx.Done():
+			errChan <- ctx.Err()
+		case resultChan <- result:
+		}
+	}()
+
+	// Wait for result or timeout
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case err := <-errChan:
+		return nil, err
+	case result := <-resultChan:
+		return result, nil
+	}
 }
 
 // createInitializeResult creates an initialization result with the given version
@@ -401,62 +430,72 @@ func (s *BaseServer) validateMessage(data []byte) error {
 
 // HandleToolCall handles a tool call request
 func (s *BaseServer) HandleToolCall(ctx context.Context, call types.ToolCall) (result *types.ToolResult, err error) {
-	// Defer panic recovery
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("tool execution panic: %v", r)
-			result = nil
+	// Check if server is shutting down
+	if s.isShuttingDown {
+		return nil, types.InvalidParamsError("server is shutting down")
+	}
+
+	// Track active operation
+	s.activeOps.Add(1)
+	defer s.activeOps.Done()
+
+	// Create timeout context if not already set
+	if _, hasTimeout := ctx.Deadline(); !hasTimeout && s.config.ConnectionTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(s.config.ConnectionTimeout)*time.Millisecond)
+		defer cancel()
+	}
+
+	// Validate the tool call
+	if s.config.EnableValidation {
+		if err := s.validateToolCall(call); err != nil {
+			return nil, fmt.Errorf("validation failed: %w", err)
 		}
-	}()
+	}
 
+	// Get the tool handler
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	handler, exists := s.handlers[call.Name]
+	tool, toolExists := s.tools[call.Name]
+	s.mu.RUnlock()
 
-	// Validate the tool call message
-	callBytes, err := json.Marshal(call)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal tool call: %w", err)
-	}
-	if err := s.validateMessage(callBytes); err != nil {
-		return nil, fmt.Errorf("invalid tool call message: %w", err)
-	}
-
-	// Validate tool call
-	if err := s.validateToolCall(call); err != nil {
-		return nil, fmt.Errorf("tool call validation failed: %w", err)
-	}
-
-	// Find tool
-	tool, ok := s.tools[call.Name]
-	if !ok {
+	if !exists || !toolExists {
 		return nil, types.InvalidParamsError(fmt.Sprintf("tool not found: %s", call.Name))
 	}
 
-	// Find handler
-	handler, ok := s.handlers[call.Name]
-	if !ok {
-		return nil, types.InvalidParamsError(fmt.Sprintf("no handler registered for tool: %s", call.Name))
-	}
-
 	// Validate parameters against schema if validation is enabled
-	if s.config.EnableValidation && tool.InputSchema != nil {
+	if s.config.EnableValidation {
 		var schema map[string]interface{}
 		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal tool schema: %w", err)
 		}
-
 		if err := validation.ValidateParameters(call.Parameters, schema); err != nil {
-			return nil, fmt.Errorf("invalid tool parameters: %w", err)
+			return nil, types.InvalidParamsError(fmt.Sprintf("invalid parameters: %v", err))
 		}
 	}
 
-	// Execute tool with panic recovery
-	result, err = handler(ctx, call.Parameters)
-	if err != nil {
-		return nil, fmt.Errorf("tool execution failed: %w", err)
-	}
+	// Execute the handler with timeout context
+	resultChan := make(chan *types.ToolResult, 1)
+	errChan := make(chan error, 1)
 
-	return result, nil
+	go func() {
+		result, err := handler(ctx, call.Parameters)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		resultChan <- result
+	}()
+
+	// Wait for result or timeout
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case err := <-errChan:
+		return nil, err
+	case result := <-resultChan:
+		return result, nil
+	}
 }
 
 // GetInitializationOptions returns the server initialization options
@@ -466,10 +505,40 @@ func (s *BaseServer) GetInitializationOptions() *InitializationOptions {
 
 // Start starts the server with the given configuration
 func (s *BaseServer) Start(ctx context.Context) error {
-	return nil // Base implementation does nothing
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.isShuttingDown {
+		return types.InvalidParamsError("server is shutting down")
+	}
+
+	return nil
 }
 
 // Stop gracefully stops the server
 func (s *BaseServer) Stop(ctx context.Context) error {
-	return nil // Base implementation does nothing
+	var shutdownErr error
+	s.shutdownOnce.Do(func() {
+		// Mark server as shutting down
+		s.mu.Lock()
+		s.isShuttingDown = true
+		s.mu.Unlock()
+
+		// Create a channel to signal when all operations are done
+		done := make(chan struct{})
+		go func() {
+			s.activeOps.Wait()
+			close(done)
+		}()
+
+		// Wait for either context cancellation or all operations to complete
+		select {
+		case <-ctx.Done():
+			shutdownErr = ctx.Err()
+		case <-done:
+			// All operations completed successfully
+		}
+	})
+
+	return shutdownErr
 }
