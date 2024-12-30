@@ -147,6 +147,71 @@ func TestErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Error("Expected error for incomplete tool result, got nil")
 		}
+
+		// Test with split JSON messages
+		splitJSON := []string{
+			`{"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "test_tool", `,
+			`"parameters": {"param1": "test"}}, "id": 1}`,
+		}
+		for _, part := range splitJSON {
+			var req types.Request
+			if err := json.Unmarshal([]byte(part), &req); err == nil && part != splitJSON[len(splitJSON)-1] {
+				t.Error("Expected error for split JSON message part, got nil")
+			}
+		}
+
+		// Test with malformed UTF-8 sequences
+		malformedUTF8 := []byte{0xFF, 0xFE, 0xFD} // Invalid UTF-8 sequence
+		_, err = s.HandleToolCall(context.Background(), types.ToolCall{
+			Name: "test_tool",
+			Parameters: map[string]interface{}{
+				"param1": string(malformedUTF8),
+			},
+		})
+		if err == nil {
+			t.Error("Expected error for malformed UTF-8 sequence, got nil")
+		}
+
+		// Test with nested partial objects
+		nestedPartialJSON := json.RawMessage(`{
+			"name": "test_tool",
+			"parameters": {
+				"nested": {
+					"field1": "value1",
+					"field2": {
+						"subfield1": "value2",
+						"subfield2":
+					}
+				}
+			}
+		}`)
+		var nestedToolCall types.ToolCall
+		if err := json.Unmarshal(nestedPartialJSON, &nestedToolCall); err == nil {
+			t.Error("Expected error for nested partial JSON, got nil")
+		}
+
+		// Test with array boundary cases
+		arrayPartialJSON := json.RawMessage(`{
+			"name": "test_tool",
+			"parameters": {
+				"array": [1, 2, 3,]  // Invalid trailing comma
+			}
+		}`)
+		var arrayToolCall types.ToolCall
+		if err := json.Unmarshal(arrayPartialJSON, &arrayToolCall); err == nil {
+			t.Error("Expected error for invalid array JSON, got nil")
+		}
+
+		// Test with missing closing brackets/braces
+		unclosedJSON := json.RawMessage(`{
+			"name": "test_tool",
+			"parameters": {
+				"field": "value"
+		`)
+		var unclosedToolCall types.ToolCall
+		if err := json.Unmarshal(unclosedJSON, &unclosedToolCall); err == nil {
+			t.Error("Expected error for unclosed JSON, got nil")
+		}
 	})
 
 	t.Run("Message size limits", func(t *testing.T) {

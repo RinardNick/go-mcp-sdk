@@ -209,7 +209,7 @@ func TestProtocolVersionNegotiation(t *testing.T) {
 	t.Run("Fallback to older supported version", func(t *testing.T) {
 		s := server.NewServer(&server.InitializationOptions{
 			Version:           "2.0",
-			SupportedVersions: []string{"1.0", "1.5", "0.9"}, // Ordered from newest to oldest
+			SupportedVersions: []string{"1.5", "1.0", "0.9"}, // Ordered from newest to oldest
 			Capabilities: map[string]interface{}{
 				"tools": map[string]interface{}{
 					"supportsProgress":     true,
@@ -218,41 +218,92 @@ func TestProtocolVersionNegotiation(t *testing.T) {
 			},
 		})
 
-		// Try to initialize with a version that should trigger fallback
-		initParams := types.InitializeParams{
-			ProtocolVersion: "1.0", // Should match one of the supported versions
-			ClientInfo: types.Implementation{
-				Name:    "test-client",
-				Version: "1.0.0",
+		testCases := []struct {
+			name           string
+			requestVersion string
+			expectVersion  string
+			expectError    bool
+		}{
+			{
+				name:           "Exact match with primary version",
+				requestVersion: "2.0",
+				expectVersion:  "2.0",
+				expectError:    false,
 			},
-			Capabilities: types.ClientCapabilities{
-				Tools: &types.ToolCapabilities{
-					SupportsProgress:     true,
-					SupportsCancellation: true,
-				},
+			{
+				name:           "Fallback to newest compatible version",
+				requestVersion: "1.5",
+				expectVersion:  "1.5",
+				expectError:    false,
+			},
+			{
+				name:           "Fallback to older compatible version",
+				requestVersion: "1.0",
+				expectVersion:  "1.0",
+				expectError:    false,
+			},
+			{
+				name:           "Fallback to oldest supported version",
+				requestVersion: "0.9",
+				expectVersion:  "0.9",
+				expectError:    false,
+			},
+			{
+				name:           "Reject version between supported versions",
+				requestVersion: "1.2",
+				expectVersion:  "",
+				expectError:    true,
+			},
+			{
+				name:           "Reject version newer than primary",
+				requestVersion: "3.0",
+				expectVersion:  "",
+				expectError:    true,
+			},
+			{
+				name:           "Reject version older than oldest supported",
+				requestVersion: "0.8",
+				expectVersion:  "",
+				expectError:    true,
 			},
 		}
 
-		result, err := s.HandleInitialize(context.Background(), initParams)
-		if err != nil {
-			t.Errorf("Expected successful fallback to version 1.0, got error: %v", err)
-			return
-		}
-		if result == nil {
-			t.Error("Expected non-nil result after successful fallback")
-			return
-		}
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				initParams := types.InitializeParams{
+					ProtocolVersion: tc.requestVersion,
+					ClientInfo: types.Implementation{
+						Name:    "test-client",
+						Version: "1.0.0",
+					},
+					Capabilities: types.ClientCapabilities{
+						Tools: &types.ToolCapabilities{
+							SupportsProgress:     true,
+							SupportsCancellation: true,
+						},
+					},
+				}
 
-		// Verify the server responded with the fallback version
-		if result.ProtocolVersion != "1.0" {
-			t.Errorf("Expected server to use fallback version 1.0, got %s", result.ProtocolVersion)
-		}
+				result, err := s.HandleInitialize(context.Background(), initParams)
 
-		// Try a version that's not in the supported list
-		initParams.ProtocolVersion = "1.1"
-		result, err = s.HandleInitialize(context.Background(), initParams)
-		if err == nil {
-			t.Error("Expected error for unsupported version 1.1")
+				if tc.expectError {
+					if err == nil {
+						t.Errorf("Expected error for version %s, got nil", tc.requestVersion)
+					}
+					if result != nil {
+						t.Errorf("Expected nil result for version %s, got %v", tc.requestVersion, result)
+					}
+				} else {
+					if err != nil {
+						t.Errorf("Expected success for version %s, got error: %v", tc.requestVersion, err)
+					}
+					if result == nil {
+						t.Errorf("Expected non-nil result for version %s", tc.requestVersion)
+					} else if result.ProtocolVersion != tc.expectVersion {
+						t.Errorf("Expected version %s, got %s", tc.expectVersion, result.ProtocolVersion)
+					}
+				}
+			})
 		}
 	})
 }

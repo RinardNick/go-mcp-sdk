@@ -1,6 +1,6 @@
 Protocol Version Negotiation:
 ✅ Test rejection of unsupported protocol versions
-❌ Test fallback to older supported versions
+✅ Test fallback to older supported versions
 ✅ Basic protocol version validation
 ❌ Test malformed version strings
 ❌ Test version compatibility matrix
