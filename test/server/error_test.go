@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,42 @@ import (
 	"github.com/RinardNick/go-mcp-sdk/pkg/server"
 	"github.com/RinardNick/go-mcp-sdk/pkg/types"
 )
+
+// validateJSON checks if a byte slice contains valid JSON
+func validateJSON(data []byte) error {
+	// First check if the data is empty
+	if len(data) == 0 {
+		return fmt.Errorf("empty JSON data")
+	}
+
+	// Create a decoder that reads byte by byte
+	r := bytes.NewReader(data)
+	d := json.NewDecoder(r)
+	d.UseNumber()
+
+	// Try to decode the JSON
+	var v interface{}
+	err := d.Decode(&v)
+	if err != nil {
+		return fmt.Errorf("invalid JSON: %v", err)
+	}
+
+	// Check for trailing data
+	if d.More() {
+		return fmt.Errorf("trailing data after JSON value")
+	}
+
+	// Check for unclosed structures in the original data
+	trimmed := bytes.TrimSpace(data)
+	if bytes.Count(trimmed, []byte("{")) != bytes.Count(trimmed, []byte("}")) {
+		return fmt.Errorf("unclosed JSON: mismatched braces")
+	}
+	if bytes.Count(trimmed, []byte("[")) != bytes.Count(trimmed, []byte("]")) {
+		return fmt.Errorf("unclosed JSON: mismatched brackets")
+	}
+
+	return nil
+}
 
 func TestErrorHandling(t *testing.T) {
 	t.Run("Malformed JSON in tool parameters", func(t *testing.T) {
@@ -111,20 +148,21 @@ func TestErrorHandling(t *testing.T) {
 
 		// Test with partial tool call JSON
 		partialJSON := json.RawMessage(`{"name": "test_tool", "parameters":`)
-		var toolCall types.ToolCall
-		if err := json.Unmarshal(partialJSON, &toolCall); err == nil {
+		if err := validateJSON(partialJSON); err == nil {
 			t.Error("Expected error for partial JSON in tool call, got nil")
 		}
 
 		// Test with incomplete initialization params
 		partialJSON = json.RawMessage(`{"protocolVersion": "1.0", "clientInfo":`)
-		var params types.InitializeParams
-		if err := json.Unmarshal(partialJSON, &params); err == nil {
+		if err := validateJSON(partialJSON); err == nil {
 			t.Error("Expected error for partial JSON in initialization params, got nil")
 		}
 
 		// Test with truncated tool schema
 		partialSchema := json.RawMessage(`{"type": "object", "properties":`)
+		if err := validateJSON(partialSchema); err == nil {
+			t.Error("Expected error for partial schema, got nil")
+		}
 		err := s.RegisterTool(types.Tool{
 			Name:        "partial_tool",
 			Description: "A tool with partial schema",
@@ -154,14 +192,16 @@ func TestErrorHandling(t *testing.T) {
 			`"parameters": {"param1": "test"}}, "id": 1}`,
 		}
 		for _, part := range splitJSON {
-			var req types.Request
-			if err := json.Unmarshal([]byte(part), &req); err == nil && part != splitJSON[len(splitJSON)-1] {
+			if err := validateJSON([]byte(part)); err == nil && part != splitJSON[len(splitJSON)-1] {
 				t.Error("Expected error for split JSON message part, got nil")
 			}
 		}
 
 		// Test with malformed UTF-8 sequences
 		malformedUTF8 := []byte{0xFF, 0xFE, 0xFD} // Invalid UTF-8 sequence
+		if err := validateJSON(malformedUTF8); err == nil {
+			t.Error("Expected error for malformed UTF-8 sequence, got nil")
+		}
 		_, err = s.HandleToolCall(context.Background(), types.ToolCall{
 			Name: "test_tool",
 			Parameters: map[string]interface{}{
@@ -185,8 +225,7 @@ func TestErrorHandling(t *testing.T) {
 				}
 			}
 		}`)
-		var nestedToolCall types.ToolCall
-		if err := json.Unmarshal(nestedPartialJSON, &nestedToolCall); err == nil {
+		if err := validateJSON(nestedPartialJSON); err == nil {
 			t.Error("Expected error for nested partial JSON, got nil")
 		}
 
@@ -197,20 +236,84 @@ func TestErrorHandling(t *testing.T) {
 				"array": [1, 2, 3,]  // Invalid trailing comma
 			}
 		}`)
-		var arrayToolCall types.ToolCall
-		if err := json.Unmarshal(arrayPartialJSON, &arrayToolCall); err == nil {
+		if err := validateJSON(arrayPartialJSON); err == nil {
 			t.Error("Expected error for invalid array JSON, got nil")
 		}
 
 		// Test with missing closing brackets/braces
-		unclosedJSON := json.RawMessage(`{
+		unclosedJSON := []byte(`{
 			"name": "test_tool",
 			"parameters": {
 				"field": "value"
-		`)
-		var unclosedToolCall types.ToolCall
-		if err := json.Unmarshal(unclosedJSON, &unclosedToolCall); err == nil {
+			}`) // Missing closing brace for the root object
+		if err := validateJSON(unclosedJSON); err == nil {
 			t.Error("Expected error for unclosed JSON, got nil")
+		}
+
+		// Test with missing required fields
+		missingFieldsJSON := []byte(`{
+			"name": "test_tool",
+			"parameters": {}
+		}`)
+		if err := validateJSON(missingFieldsJSON); err != nil {
+			t.Error("Expected no error for valid JSON with missing fields, got:", err)
+		}
+
+		// Test with empty object
+		emptyJSON := []byte(`{}`)
+		if err := validateJSON(emptyJSON); err != nil {
+			t.Error("Expected no error for empty JSON object, got:", err)
+		}
+
+		// Test with invalid JSON structure
+		invalidJSON := []byte(`{
+			"name": "test_tool",
+			"parameters": {
+				"field": "value"
+			},,,  // Invalid syntax
+		}`)
+		if err := validateJSON(invalidJSON); err == nil {
+			t.Error("Expected error for invalid JSON structure, got nil")
+		}
+
+		// Test with unterminated string
+		unterminatedString := []byte(`{
+			"name": "test_tool",
+			"parameters": {
+				"field": "value
+			}
+		}`)
+		if err := validateJSON(unterminatedString); err == nil {
+			t.Error("Expected error for unterminated string, got nil")
+		}
+
+		// Test with explicitly unclosed object
+		explicitlyUnclosedJSON := []byte(`{
+			"name": "test_tool",
+			"parameters": {
+				"field": "value"
+			}`) // Explicitly missing closing brace
+		if err := validateJSON(explicitlyUnclosedJSON); err == nil {
+			t.Error("Expected error for explicitly unclosed JSON, got nil")
+		}
+
+		// Test with explicitly unclosed object (no closing brace)
+		reallyUnclosedJSON := []byte(`{
+			"name": "test_tool",
+			"parameters": {
+				"field": "value"
+			}`) // Missing both closing braces
+		if err := validateJSON(reallyUnclosedJSON); err == nil {
+			t.Error("Expected error for really unclosed JSON, got nil")
+		}
+
+		// Test with explicitly unclosed object (no closing brace and no closing quote)
+		superUnclosedJSON := []byte(`{
+			"name": "test_tool",
+			"parameters": {
+				"field": "value`) // Missing quote, braces, and everything
+		if err := validateJSON(superUnclosedJSON); err == nil {
+			t.Error("Expected error for super unclosed JSON, got nil")
 		}
 	})
 

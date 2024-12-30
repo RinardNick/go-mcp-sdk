@@ -2,8 +2,8 @@ Protocol Version Negotiation:
 ✅ Test rejection of unsupported protocol versions
 ✅ Test fallback to older supported versions
 ✅ Basic protocol version validation
-❌ Test malformed version strings
-❌ Test version compatibility matrix
+✅ Test malformed version strings
+✅ Test version compatibility matrix
 
 Error Handling Edge Cases:
 ✅ Basic error types and handling

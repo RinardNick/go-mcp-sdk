@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -306,6 +307,15 @@ func (s *BaseServer) validateInitializeParams(params types.InitializeParams) err
 
 // HandleInitialize handles an initialization request
 func (s *BaseServer) HandleInitialize(ctx context.Context, params types.InitializeParams) (*types.InitializeResult, error) {
+	// Validate the initialization params
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal initialization params: %w", err)
+	}
+	if err := s.validateMessage(paramsBytes); err != nil {
+		return nil, fmt.Errorf("invalid initialization params: %w", err)
+	}
+
 	// First check if the version is supported
 	supportedVersions := append([]string{s.options.Version}, s.options.SupportedVersions...)
 	versionSupported := false
@@ -370,10 +380,33 @@ func validateMessageSize(data []byte) error {
 	return nil
 }
 
+// validateMessage checks if a message is valid
+func (s *BaseServer) validateMessage(data []byte) error {
+	var js json.RawMessage
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&js); err != nil {
+		return fmt.Errorf("invalid JSON: %w", err)
+	}
+	if decoder.More() {
+		return fmt.Errorf("trailing data after JSON value")
+	}
+	return nil
+}
+
 // HandleToolCall handles a tool call request
 func (s *BaseServer) HandleToolCall(ctx context.Context, call types.ToolCall) (*types.ToolResult, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	// Validate the tool call message
+	callBytes, err := json.Marshal(call)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal tool call: %w", err)
+	}
+	if err := s.validateMessage(callBytes); err != nil {
+		return nil, fmt.Errorf("invalid tool call message: %w", err)
+	}
 
 	// Validate tool call
 	if err := s.validateToolCall(call); err != nil {
