@@ -352,6 +352,15 @@ func (s *BaseServer) HandleInitialize(ctx context.Context, params types.Initiali
 		defer cancel()
 	}
 
+	// Validate initialization parameters size
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return nil, types.InvalidParamsError(fmt.Sprintf("failed to marshal params: %v", err))
+	}
+	if err := validateMessageSize(paramsJSON); err != nil {
+		return nil, types.InvalidParamsError(fmt.Sprintf("initialization params validation failed: %v", err))
+	}
+
 	// Validate initialization parameters
 	if err := s.validateInitializeParams(params); err != nil {
 		return nil, err
