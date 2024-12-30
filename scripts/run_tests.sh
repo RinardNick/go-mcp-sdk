@@ -3,6 +3,9 @@
 # Exit on error
 set -e
 
+echo -e "\nRunning integration tests..."
+go test -v ./test/int_python_sdk/...
+
 echo "Running server tests..."
 go test -v ./test/server/...
 

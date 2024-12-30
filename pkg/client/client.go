@@ -72,3 +72,8 @@ func (s *Session) GetTools() []types.Tool {
 func (s *Session) ExecuteTool(ctx context.Context, call types.ToolCall) (*types.ToolResult, error) {
 	return s.client.ExecuteTool(ctx, call)
 }
+
+// Close shuts down the session and cleans up resources
+func (s *Session) Close() error {
+	return s.client.Close()
+}

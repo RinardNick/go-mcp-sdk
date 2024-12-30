@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/RinardNick/go-mcp-sdk/pkg/types"
@@ -36,6 +38,8 @@ func DefaultConfig() *Config {
 type InitializationOptions struct {
 	// Version of the MCP protocol
 	Version string `json:"version"`
+	// SupportedVersions is a list of supported protocol versions in order of preference
+	SupportedVersions []string `json:"supportedVersions,omitempty"`
 	// Capabilities supported by the server
 	Capabilities map[string]interface{} `json:"capabilities"`
 	// Additional configuration options
@@ -118,6 +122,28 @@ func (s *BaseServer) RegisterTool(tool types.Tool) error {
 		return types.InvalidParamsError("tool already registered")
 	}
 
+	// Validate tool schema
+	if !json.Valid(tool.InputSchema) {
+		return types.InvalidParamsError("invalid JSON in tool schema")
+	}
+	if err := validateMessageSize(tool.InputSchema); err != nil {
+		return fmt.Errorf("tool schema validation failed: %w", err)
+	}
+
+	// Validate schema structure
+	var schemaMap map[string]interface{}
+	if err := json.Unmarshal(tool.InputSchema, &schemaMap); err != nil {
+		return types.InvalidParamsError(fmt.Sprintf("invalid schema structure: %v", err))
+	}
+
+	// Check required schema fields
+	requiredFields := []string{"type", "properties"}
+	for _, field := range requiredFields {
+		if _, ok := schemaMap[field]; !ok {
+			return types.InvalidParamsError(fmt.Sprintf("missing required schema field: %s", field))
+		}
+	}
+
 	s.tools[tool.Name] = tool
 	return nil
 }
@@ -149,14 +175,14 @@ func (s *BaseServer) RegisterResource(resource types.Resource) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if resource.URI == "" {
-		return types.InvalidParamsError("resource URI cannot be empty")
+	if resource.ID == "" {
+		return types.InvalidParamsError("resource ID cannot be empty")
 	}
-	if _, exists := s.resources[resource.URI]; exists {
+	if _, exists := s.resources[resource.ID]; exists {
 		return types.InvalidParamsError("resource already registered")
 	}
 
-	s.resources[resource.URI] = resource
+	s.resources[resource.ID] = resource
 	return nil
 }
 
@@ -184,32 +210,205 @@ func (s *BaseServer) GetResources() []types.Resource {
 	return resources
 }
 
+// validateToolCall validates a tool call request
+func (s *BaseServer) validateToolCall(call types.ToolCall) error {
+	// Validate tool call size
+	callBytes, err := json.Marshal(call)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tool call: %w", err)
+	}
+	if err := validateMessageSize(callBytes); err != nil {
+		return fmt.Errorf("tool call validation failed: %w", err)
+	}
+	if !json.Valid(callBytes) {
+		return fmt.Errorf("invalid JSON in tool call")
+	}
+	return nil
+}
+
+// isValidVersion checks if a version string is valid
+func isValidVersion(version string) bool {
+	if version == "" {
+		return false
+	}
+
+	// Check if it's a date-based version (YYYY-MM-DD)
+	if len(version) == 10 && version[4] == '-' && version[7] == '-' {
+		year := version[0:4]
+		month := version[5:7]
+		day := version[8:10]
+
+		// Parse year
+		y, err := strconv.Atoi(year)
+		if err != nil || y < 2020 || y > 2100 {
+			return false
+		}
+
+		// Parse month
+		m, err := strconv.Atoi(month)
+		if err != nil || m < 1 || m > 12 {
+			return false
+		}
+
+		// Parse day
+		d, err := strconv.Atoi(day)
+		if err != nil || d < 1 || d > 31 {
+			return false
+		}
+
+		return true
+	}
+
+	// Check if it's a semver (X.Y or X.Y.Z)
+	parts := strings.Split(version, ".")
+	if len(parts) != 2 && len(parts) != 3 {
+		return false
+	}
+
+	for _, part := range parts {
+		if _, err := strconv.Atoi(part); err != nil {
+			return false
+		}
+	}
+
+	return true
+}
+
+// validateInitializeParams validates initialization parameters
+func (s *BaseServer) validateInitializeParams(params types.InitializeParams) error {
+	// Validate initialization params size
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("failed to marshal initialization params: %w", err)
+	}
+	if err := validateMessageSize(paramsBytes); err != nil {
+		return fmt.Errorf("initialization params validation failed: %w", err)
+	}
+	if !json.Valid(paramsBytes) {
+		return fmt.Errorf("invalid JSON in initialization params")
+	}
+
+	// Validate protocol version format
+	if !isValidVersion(params.ProtocolVersion) {
+		return fmt.Errorf("invalid protocol version format: %s", params.ProtocolVersion)
+	}
+
+	// Validate client info
+	if params.ClientInfo.Name == "" {
+		return fmt.Errorf("client name cannot be empty")
+	}
+	if params.ClientInfo.Version == "" {
+		return fmt.Errorf("client version cannot be empty")
+	}
+
+	return nil
+}
+
+// HandleInitialize handles an initialization request
+func (s *BaseServer) HandleInitialize(ctx context.Context, params types.InitializeParams) (*types.InitializeResult, error) {
+	// Validate initialization params
+	if err := s.validateInitializeParams(params); err != nil {
+		return nil, types.InvalidParamsError(err.Error())
+	}
+
+	// First try exact version match
+	if params.ProtocolVersion == s.options.Version {
+		return s.createInitializeResult(s.options.Version), nil
+	}
+
+	// If we have supported versions, try to find a match
+	if len(s.options.SupportedVersions) > 0 {
+		for _, version := range s.options.SupportedVersions {
+			if params.ProtocolVersion == version {
+				return s.createInitializeResult(version), nil
+			}
+		}
+	}
+
+	// Check if the requested version is a date-based version (YYYY-MM-DD)
+	if len(params.ProtocolVersion) == 10 && params.ProtocolVersion[4] == '-' && params.ProtocolVersion[7] == '-' {
+		// Only accept date-based versions if they are in a reasonable range
+		year := params.ProtocolVersion[0:4]
+		if year >= "2024" && year <= "2025" {
+			return s.createInitializeResult(params.ProtocolVersion), nil
+		}
+	}
+
+	// If we get here, the version is not supported
+	supportedVersions := append([]string{s.options.Version}, s.options.SupportedVersions...)
+	return nil, types.InvalidParamsError(fmt.Sprintf("unsupported protocol version: %s. Supported versions: %v", params.ProtocolVersion, supportedVersions))
+}
+
+// createInitializeResult creates an initialization result with the given version
+func (s *BaseServer) createInitializeResult(version string) *types.InitializeResult {
+	return &types.InitializeResult{
+		ProtocolVersion: version,
+		Capabilities: types.ServerCapabilities{
+			Tools: &types.ToolsCapability{
+				ListChanged: false,
+			},
+		},
+		ServerInfo: types.Implementation{
+			Name:    "go-mcp-sdk",
+			Version: "1.0.0",
+		},
+	}
+}
+
+const (
+	// MaxMessageSize is the maximum size of any message in bytes (10MB)
+	MaxMessageSize = 10 * 1024 * 1024
+)
+
+// validateMessageSize checks if a message exceeds the maximum allowed size
+func validateMessageSize(data []byte) error {
+	if len(data) > MaxMessageSize {
+		return fmt.Errorf("message size %d bytes exceeds maximum allowed size of %d bytes", len(data), MaxMessageSize)
+	}
+	return nil
+}
+
 // HandleToolCall handles a tool call request
 func (s *BaseServer) HandleToolCall(ctx context.Context, call types.ToolCall) (*types.ToolResult, error) {
 	s.mu.RLock()
-	tool, exists := s.tools[call.Name]
-	handler := s.handlers[call.Name]
-	s.mu.RUnlock()
+	defer s.mu.RUnlock()
 
-	if !exists {
-		return nil, types.MethodNotFoundError("tool not found")
+	// Validate tool call
+	if err := s.validateToolCall(call); err != nil {
+		return nil, fmt.Errorf("tool call validation failed: %w", err)
 	}
 
-	if handler == nil {
-		return nil, types.MethodNotFoundError(fmt.Sprintf("no handler registered for tool: %s", call.Name))
+	// Find tool
+	tool, ok := s.tools[call.Name]
+	if !ok {
+		return nil, types.InvalidParamsError(fmt.Sprintf("tool not found: %s", call.Name))
 	}
 
-	if s.config.EnableValidation {
+	// Find handler
+	handler, ok := s.handlers[call.Name]
+	if !ok {
+		return nil, types.InvalidParamsError(fmt.Sprintf("no handler registered for tool: %s", call.Name))
+	}
+
+	// Validate parameters against schema if validation is enabled
+	if s.config.EnableValidation && tool.InputSchema != nil {
 		var schema map[string]interface{}
 		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
-			return nil, types.InvalidParamsError(fmt.Sprintf("invalid schema: %v", err))
+			return nil, fmt.Errorf("failed to unmarshal tool schema: %w", err)
 		}
+
 		if err := validation.ValidateParameters(call.Parameters, schema); err != nil {
-			return nil, types.InvalidParamsError(err.Error())
+			return nil, fmt.Errorf("invalid tool parameters: %w", err)
 		}
 	}
 
-	return handler(ctx, call.Parameters)
+	// Execute tool
+	result, err := handler(ctx, call.Parameters)
+	if err != nil {
+		return nil, fmt.Errorf("tool execution failed: %w", err)
+	}
+
+	return result, nil
 }
 
 // GetInitializationOptions returns the server initialization options

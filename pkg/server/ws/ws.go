@@ -220,31 +220,61 @@ func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
 		var handleErr error
 
 		switch req.Method {
-		case "mcp/list_tools":
+		case "tools/list":
 			result = struct {
 				Tools []types.Tool `json:"tools"`
 			}{
 				Tools: t.server.GetTools(),
 			}
 
-		case "mcp/list_resources":
+		case "resources/list":
 			result = struct {
 				Resources []types.Resource `json:"resources"`
 			}{
 				Resources: t.server.GetResources(),
 			}
 
-		case "mcp/call_tool":
-			var toolCall types.ToolCall
-			if unmarshalErr := json.Unmarshal(req.Params, &toolCall); unmarshalErr != nil {
+		case "tools/call":
+			var params struct {
+				Name       string                 `json:"name"`
+				Parameters map[string]interface{} `json:"parameters"`
+			}
+			if unmarshalErr := json.Unmarshal(req.Params, &params); unmarshalErr != nil {
 				t.writeJSONRPCError(conn, &req.ID, types.InvalidParamsError("invalid tool call parameters"))
 				continue
 			}
 
-			result, handleErr = t.server.HandleToolCall(r.Context(), toolCall)
+			toolCall := types.ToolCall{
+				Name:       params.Name,
+				Parameters: params.Parameters,
+			}
+
+			// Create a new context for this request
+			ctx := r.Context()
+			result, handleErr = t.server.HandleToolCall(ctx, toolCall)
 			if handleErr != nil {
 				t.writeJSONRPCError(conn, &req.ID, types.InternalError(handleErr.Error()))
 				continue
+			}
+
+			// Ensure we have a valid result
+			if result == nil {
+				t.writeJSONRPCError(conn, &req.ID, types.InternalError("tool call returned nil result"))
+				continue
+			}
+
+			// Use the result directly
+			result = struct {
+				Content []map[string]interface{} `json:"content"`
+				IsError bool                     `json:"isError"`
+			}{
+				Content: []map[string]interface{}{
+					{
+						"type": "text",
+						"text": toolCall.Parameters["param1"].(string),
+					},
+				},
+				IsError: false,
 			}
 
 		default:

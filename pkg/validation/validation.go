@@ -85,29 +85,39 @@ func ValidateParameter(name string, value any, schema map[string]any) error {
 }
 
 // ValidateParameters validates a set of parameters against their schemas
-func ValidateParameters(params map[string]any, schemas map[string]any) error {
-	// Check for required parameters
-	for name, schema := range schemas {
-		schemaMap, ok := schema.(map[string]any)
-		if !ok {
-			return fmt.Errorf("invalid schema for parameter: %s", name)
-		}
+func ValidateParameters(params map[string]any, schema map[string]any) error {
+	if schema["type"] != "object" {
+		return fmt.Errorf("schema must be of type object")
+	}
 
-		if required, ok := schemaMap["required"].(bool); ok && required {
-			if _, exists := params[name]; !exists {
-				return fmt.Errorf("missing required parameter: %s", name)
-			}
+	properties, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid schema: properties must be an object")
+	}
+
+	required, _ := schema["required"].([]interface{})
+	requiredSet := make(map[string]bool)
+	for _, r := range required {
+		if name, ok := r.(string); ok {
+			requiredSet[name] = true
+		}
+	}
+
+	// Check for required parameters
+	for name := range requiredSet {
+		if _, exists := params[name]; !exists {
+			return fmt.Errorf("missing required parameter: %s", name)
 		}
 	}
 
 	// Validate provided parameters
 	for name, value := range params {
-		schema, ok := schemas[name].(map[string]any)
+		propSchema, ok := properties[name].(map[string]interface{})
 		if !ok {
 			return fmt.Errorf("unknown parameter: %s", name)
 		}
 
-		if err := ValidateParameter(name, value, schema); err != nil {
+		if err := ValidateParameter(name, value, propSchema); err != nil {
 			return err
 		}
 	}

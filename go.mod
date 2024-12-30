@@ -1,6 +1,6 @@
 module github.com/RinardNick/go-mcp-sdk
 
-go 1.22.4
+go 1.23
 
 require (
 	github.com/gorilla/websocket v1.5.3
@@ -12,6 +12,6 @@ require (
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	golang.org/x/net v0.0.0-20191116160921-f9c825593386 // indirect
+	golang.org/x/net v0.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

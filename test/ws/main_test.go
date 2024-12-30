@@ -59,7 +59,7 @@ func TestWebSocketTransportReconnection(t *testing.T) {
 		// Test that new connection works
 		req := map[string]interface{}{
 			"jsonrpc": "2.0",
-			"method":  "mcp/list_tools",
+			"method":  "tools/list",
 			"id":      1,
 		}
 		if err := conn2.WriteJSON(req); err != nil {
@@ -106,9 +106,20 @@ func TestWebSocketTransportConcurrentClients(t *testing.T) {
 	}
 
 	handler := func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
-		return types.NewToolResult(map[string]interface{}{
-			"output": params["param1"],
+		// Create a new result for each request to avoid sharing state
+		result, err := types.NewToolResult(map[string]interface{}{
+			"content": []map[string]interface{}{
+				{
+					"type": "text",
+					"text": params["param1"].(string),
+				},
+			},
+			"isError": false,
 		})
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
 	}
 	if err := s.RegisterToolHandler("test_tool", handler); err != nil {
 		t.Fatalf("Failed to register handler: %v", err)
@@ -132,14 +143,21 @@ func TestWebSocketTransportConcurrentClients(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(numClients)
 
+		// Create a channel to collect errors
+		errChan := make(chan error, numClients)
+
+		// Add a delay between client connections
 		for i := 0; i < numClients; i++ {
 			go func(clientID int) {
 				defer wg.Done()
 
+				// Add a small delay between client connections
+				time.Sleep(time.Duration(clientID) * 10 * time.Millisecond)
+
 				// Connect
 				conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 				if err != nil {
-					t.Errorf("Client %d failed to connect: %v", clientID, err)
+					errChan <- fmt.Errorf("Client %d failed to connect: %v", clientID, err)
 					return
 				}
 				defer conn.Close()
@@ -147,52 +165,90 @@ func TestWebSocketTransportConcurrentClients(t *testing.T) {
 				// Send tool call request
 				req := map[string]interface{}{
 					"jsonrpc": "2.0",
-					"method":  "mcp/call_tool",
+					"method":  "tools/call",
 					"params": map[string]interface{}{
 						"name": "test_tool",
-						"parameters": map[string]interface{}{
+						"Parameters": map[string]interface{}{
 							"param1": fmt.Sprintf("test input %d", clientID),
 						},
 					},
 					"id": clientID,
 				}
 				if err := conn.WriteJSON(req); err != nil {
-					t.Errorf("Client %d failed to write request: %v", clientID, err)
+					errChan <- fmt.Errorf("Client %d failed to write request: %v", clientID, err)
 					return
 				}
 
-				// Read response
+				// Read response with timeout
+				done := make(chan struct{})
 				var resp types.Response
-				if err := conn.ReadJSON(&resp); err != nil {
-					t.Errorf("Client %d failed to read response: %v", clientID, err)
+				go func() {
+					if err := conn.ReadJSON(&resp); err != nil {
+						errChan <- fmt.Errorf("Client %d failed to read response: %v", clientID, err)
+						return
+					}
+					close(done)
+				}()
+
+				select {
+				case <-done:
+					// Response received successfully
+				case <-time.After(5 * time.Second):
+					errChan <- fmt.Errorf("Client %d timed out waiting for response", clientID)
 					return
 				}
 
 				if resp.Error != nil {
-					t.Errorf("Client %d got unexpected error: %v", clientID, resp.Error)
+					errChan <- fmt.Errorf("Client %d got unexpected error: %v", clientID, resp.Error)
 					return
 				}
 
 				// Verify response
-				var result map[string]interface{}
-				if err := json.Unmarshal(resp.Result, &result); err != nil {
-					t.Errorf("Client %d failed to unmarshal result: %v", clientID, err)
+				var resultMap struct {
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+					IsError bool `json:"isError"`
+				}
+				if err := json.Unmarshal(resp.Result, &resultMap); err != nil {
+					errChan <- fmt.Errorf("Client %d failed to unmarshal result: %v", clientID, err)
 					return
 				}
 
-				output, ok := result["output"]
-				if !ok {
-					t.Errorf("Client %d: Expected output in result", clientID)
+				if len(resultMap.Content) == 0 {
+					errChan <- fmt.Errorf("Client %d: Expected non-empty content", clientID)
 					return
 				}
+
 				expected := fmt.Sprintf("test input %d", clientID)
-				if output != expected {
-					t.Errorf("Client %d: Expected output %q, got %v", clientID, expected, output)
+				if resultMap.Content[0].Text != expected {
+					errChan <- fmt.Errorf("Client %d: Expected text %q, got %v", clientID, expected, resultMap.Content[0].Text)
+					return
+				}
+
+				if resultMap.IsError {
+					errChan <- fmt.Errorf("Client %d: Expected isError to be false", clientID)
+					return
 				}
 			}(i)
 		}
 
+		// Wait for all goroutines to finish
 		wg.Wait()
+		close(errChan)
+
+		// Check for any errors
+		var errors []error
+		for err := range errChan {
+			errors = append(errors, err)
+		}
+
+		if len(errors) > 0 {
+			for _, err := range errors {
+				t.Error(err)
+			}
+		}
 	})
 }
 
@@ -234,7 +290,13 @@ func TestWSServer(t *testing.T) {
 	// Register tool handler
 	err = s.RegisterToolHandler("test_tool", func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
 		result, err := types.NewToolResult(map[string]interface{}{
-			"output": "test output",
+			"content": []map[string]interface{}{
+				{
+					"type": "text",
+					"text": params["param1"],
+				},
+			},
+			"isError": false,
 		})
 		if err != nil {
 			return nil, err
@@ -249,7 +311,7 @@ func TestWSServer(t *testing.T) {
 	toolCall := types.ToolCall{
 		Name: "test_tool",
 		Parameters: map[string]interface{}{
-			"param1": "test value",
+			"param1": "test",
 		},
 	}
 
@@ -259,12 +321,24 @@ func TestWSServer(t *testing.T) {
 	}
 
 	// Check result
-	var resultMap map[string]interface{}
+	var resultMap struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
 	if err := json.Unmarshal(result.Result, &resultMap); err != nil {
 		t.Fatalf("Failed to unmarshal result: %v", err)
 	}
 
-	if resultMap["output"] != "test output" {
-		t.Errorf("Expected output 'test output', got %v", resultMap["output"])
+	if len(resultMap.Content) == 0 {
+		t.Error("Expected non-empty content")
+	} else if resultMap.Content[0].Text != "test" {
+		t.Errorf("Expected text 'test', got %v", resultMap.Content[0].Text)
+	}
+
+	if resultMap.IsError {
+		t.Error("Expected isError to be false")
 	}
 }

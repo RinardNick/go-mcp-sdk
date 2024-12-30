@@ -7,16 +7,15 @@ import (
 
 // ClientCapabilities represents the capabilities of the client
 type ClientCapabilities struct {
+	Tools        *ToolCapabilities      `json:"tools"`
 	Experimental map[string]interface{} `json:"experimental,omitempty"`
 	Sampling     map[string]interface{} `json:"sampling,omitempty"`
-	Roots        *RootsCapability       `json:"roots,omitempty"`
-	Tools        *ToolCapabilities      `json:"tools,omitempty"`
 }
 
 // ToolCapabilities represents the tool-related capabilities
 type ToolCapabilities struct {
-	SupportsProgress     bool `json:"supportsProgress,omitempty"`
-	SupportsCancellation bool `json:"supportsCancellation,omitempty"`
+	SupportsProgress     bool `json:"supports_progress"`
+	SupportsCancellation bool `json:"supports_cancellation"`
 }
 
 // RootsCapability represents the roots capability
@@ -24,31 +23,44 @@ type RootsCapability struct {
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
-// InitializeParams represents the parameters for initialization
-type InitializeParams struct {
-	ProtocolVersion string             `json:"protocolVersion"`
-	Capabilities    ClientCapabilities `json:"capabilities"`
-	ClientInfo      ClientInfo         `json:"clientInfo"`
-}
-
-// ClientInfo represents information about the client
-type ClientInfo struct {
+// Implementation represents information about an MCP implementation
+type Implementation struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
 
+// InitializeParams represents the parameters for initialization
+type InitializeParams struct {
+	ProtocolVersion string             `json:"protocolVersion"`
+	ClientInfo      Implementation     `json:"clientInfo"`
+	Capabilities    ClientCapabilities `json:"capabilities"`
+}
+
+// ClientInfo represents information about the client
+type ClientInfo struct {
+	Name    string `json:"client_name"`
+	Version string `json:"client_version"`
+}
+
 // Tool represents a tool that can be executed
 type Tool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"inputSchema"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Parameters  map[string]interface{} `json:"parameters"`
+	InputSchema json.RawMessage        `json:"inputSchema"`
 }
 
 // NewToolInputSchema creates a new json.RawMessage from a map
 func NewToolInputSchema(schema map[string]interface{}) (json.RawMessage, error) {
 	bytes, err := json.Marshal(schema)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal tool schema: %w", err)
+	}
+	if err := validateMessageSize(bytes); err != nil {
+		return nil, fmt.Errorf("tool schema validation failed: %w", err)
+	}
+	if err := validateJSON(bytes); err != nil {
+		return nil, fmt.Errorf("tool schema validation failed: %w", err)
 	}
 	return json.RawMessage(bytes), nil
 }
@@ -69,17 +81,34 @@ type ToolResult struct {
 func NewToolResult(result map[string]interface{}) (*ToolResult, error) {
 	bytes, err := json.Marshal(result)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal tool result: %w", err)
+	}
+	if err := validateMessageSize(bytes); err != nil {
+		return nil, fmt.Errorf("tool result validation failed: %w", err)
+	}
+	if err := validateJSON(bytes); err != nil {
+		return nil, fmt.Errorf("tool result validation failed: %w", err)
+	}
+	if content, ok := result["content"].([]map[string]interface{}); ok {
+		for _, item := range content {
+			if err := validateRequiredFields(item, []string{"type", "text"}); err != nil {
+				return nil, fmt.Errorf("tool result validation failed: %w", err)
+			}
+		}
 	}
 	return &ToolResult{
 		Result: json.RawMessage(bytes),
 	}, nil
 }
 
-// Resource represents an MCP resource
+// Resource represents a resource available to the server
 type Resource struct {
-	URI  string `json:"uri"`
-	Name string `json:"name"`
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Type        string                 `json:"type"`
+	URI         string                 `json:"uri"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // MCPError represents an error in the MCP protocol
@@ -148,4 +177,108 @@ func NewParseError(message string, data interface{}) *MCPError {
 
 func (e *ParseError) Error() string {
 	return fmt.Sprintf("Parse error: %s", e.Message)
+}
+
+// Progress represents a progress notification from a tool
+type Progress struct {
+	ToolID  string `json:"toolId"`
+	Current int    `json:"current"`
+	Total   int    `json:"total"`
+	Message string `json:"message"`
+}
+
+// ProgressHandler is a function that handles progress notifications
+type ProgressHandler func(Progress)
+
+// Notification represents a notification from the server
+type Notification struct {
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
+}
+
+// ProgressNotification represents a progress notification
+type ProgressNotification struct {
+	Progress Progress `json:"progress"`
+}
+
+// ServerInfo represents information about the server
+type ServerInfo struct {
+	Name    string `json:"server_name"`
+	Version string `json:"server_version"`
+}
+
+// InitializeResult represents the result of initialization
+type InitializeResult struct {
+	ProtocolVersion string             `json:"protocolVersion"`
+	Capabilities    ServerCapabilities `json:"capabilities"`
+	ServerInfo      Implementation     `json:"serverInfo"`
+}
+
+// InitializationOptions represents server initialization options
+type InitializationOptions struct {
+	ServerName    string             `json:"server_name"`
+	ServerVersion string             `json:"server_version"`
+	Capabilities  ServerCapabilities `json:"capabilities"`
+}
+
+const (
+	// MaxMessageSize is the maximum size of any message in bytes (10MB)
+	MaxMessageSize = 10 * 1024 * 1024
+)
+
+// validateMessageSize checks if a message exceeds the maximum allowed size
+func validateMessageSize(data []byte) error {
+	if len(data) > MaxMessageSize {
+		return fmt.Errorf("message size %d bytes exceeds maximum allowed size of %d bytes", len(data), MaxMessageSize)
+	}
+	return nil
+}
+
+// validateJSON checks if a JSON message is well-formed
+func validateJSON(data []byte) error {
+	if !json.Valid(data) {
+		return fmt.Errorf("invalid JSON: %s", string(data))
+	}
+	return nil
+}
+
+// validateRequiredFields checks if a map has all required fields
+func validateRequiredFields(data map[string]interface{}, required []string) error {
+	for _, field := range required {
+		if _, ok := data[field]; !ok {
+			return fmt.Errorf("missing required field: %s", field)
+		}
+	}
+	return nil
+}
+
+// Message represents a chat message
+type Message struct {
+	Role     string    `json:"role"`
+	Content  string    `json:"content"`
+	ToolCall *ToolCall `json:"toolCall,omitempty"`
+}
+
+// ServerCapabilities represents the capabilities of the server
+type ServerCapabilities struct {
+	Tools *ToolsCapability `json:"tools"`
+}
+
+// ToolsCapability represents the tool-related capabilities of the server
+type ToolsCapability struct {
+	ListChanged bool `json:"listChanged"`
+}
+
+// LoggingCapability represents logging capabilities
+type LoggingCapability struct{}
+
+// PromptsCapability represents prompt capabilities
+type PromptsCapability struct {
+	ListChanged bool `json:"listChanged,omitempty"`
+}
+
+// ResourcesCapability represents resource capabilities
+type ResourcesCapability struct {
+	Subscribe   bool `json:"subscribe,omitempty"`
+	ListChanged bool `json:"listChanged,omitempty"`
 }

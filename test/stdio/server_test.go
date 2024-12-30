@@ -65,9 +65,22 @@ func TestStdioServer(t *testing.T) {
 
 	// Register tool handler
 	err = s.RegisterToolHandler("test_tool", func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
-		return types.NewToolResult(map[string]interface{}{
-			"output": "test output",
-		})
+		result := map[string]interface{}{
+			"content": []map[string]interface{}{
+				{
+					"type": "text",
+					"text": "test output",
+				},
+			},
+			"isError": false,
+		}
+		resultBytes, err := json.Marshal(result)
+		if err != nil {
+			return nil, err
+		}
+		return &types.ToolResult{
+			Result: resultBytes,
+		}, nil
 	})
 	if err != nil {
 		t.Fatalf("Failed to register tool handler: %v", err)
@@ -87,12 +100,24 @@ func TestStdioServer(t *testing.T) {
 	}
 
 	// Check result
-	var resultMap map[string]interface{}
+	var resultMap struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
 	if err := json.Unmarshal(result.Result, &resultMap); err != nil {
 		t.Fatalf("Failed to unmarshal result: %v", err)
 	}
 
-	if resultMap["output"] != "test output" {
-		t.Errorf("Expected output 'test output', got %v", resultMap["output"])
+	if len(resultMap.Content) == 0 {
+		t.Fatal("Expected non-empty content")
+	}
+	if resultMap.Content[0].Text != "test output" {
+		t.Errorf("Expected output 'test output', got %v", resultMap.Content[0].Text)
+	}
+	if resultMap.IsError {
+		t.Error("Expected isError to be false")
 	}
 }

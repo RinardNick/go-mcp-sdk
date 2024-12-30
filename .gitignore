@@ -8,6 +8,10 @@
 # Test binary, built with `go test -c`
 *.test
 
+## Additional Test Files
+test/int_python_sdk/weather/.venv
+test/int_python_sdk/weather/venv
+
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 

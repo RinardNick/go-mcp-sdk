@@ -46,19 +46,22 @@ func TestServer(t *testing.T) {
 
 	// Register tool handler
 	err = s.RegisterToolHandler("test_tool", func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
-		// Convert params to map[string]interface{} for NewToolResult
-		paramsInterface := make(map[string]interface{}, len(params))
-		for k, v := range params {
-			paramsInterface[k] = v
+		result := map[string]interface{}{
+			"content": []map[string]interface{}{
+				{
+					"type": "text",
+					"text": "test output",
+				},
+			},
+			"isError": false,
 		}
-
-		result, err := types.NewToolResult(map[string]interface{}{
-			"output": "test output",
-		})
+		resultBytes, err := json.Marshal(result)
 		if err != nil {
 			return nil, err
 		}
-		return result, nil
+		return &types.ToolResult{
+			Result: resultBytes,
+		}, nil
 	})
 	if err != nil {
 		t.Fatalf("Failed to register tool handler: %v", err)
@@ -78,91 +81,120 @@ func TestServer(t *testing.T) {
 	}
 
 	// Check result
-	var resultMap map[string]interface{}
+	var resultMap struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
 	if err := json.Unmarshal(result.Result, &resultMap); err != nil {
 		t.Fatalf("Failed to unmarshal result: %v", err)
 	}
 
-	if resultMap["output"] != "test output" {
-		t.Errorf("Expected output 'test output', got %v", resultMap["output"])
+	if len(resultMap.Content) == 0 {
+		t.Fatal("Expected non-empty content")
+	}
+	if resultMap.Content[0].Text != "test output" {
+		t.Errorf("Expected output 'test output', got %v", resultMap.Content[0].Text)
+	}
+	if resultMap.IsError {
+		t.Error("Expected isError to be false")
 	}
 }
 
 func TestServerWithoutValidation(t *testing.T) {
-	options := &server.InitializationOptions{
-		Version: "1.0",
-		Capabilities: map[string]interface{}{
-			"tools":     true,
-			"resources": true,
-		},
-		Config: map[string]interface{}{
-			"maxSessions":      10,
-			"enableValidation": false,
-			"logLevel":         "debug",
-		},
-	}
-	s := server.NewServer(options)
-
-	// Register test tool and handler
-	inputSchema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"param1": map[string]interface{}{
-				"type":        "string",
-				"description": "A test parameter",
+	t.Run("Tool Execution Without Validation", func(t *testing.T) {
+		s := server.NewServer(&server.InitializationOptions{
+			Version: "1.0",
+			Config: map[string]interface{}{
+				"enableValidation": false,
 			},
-		},
-		"required": []string{"param1"},
-	}
-	schemaBytes, err := types.NewToolInputSchema(inputSchema)
-	if err != nil {
-		t.Fatalf("Failed to create input schema: %v", err)
-	}
+		})
 
-	tool := types.Tool{
-		Name:        "test_tool",
-		Description: "A test tool",
-		InputSchema: schemaBytes,
-	}
-	if err := s.RegisterTool(tool); err != nil {
-		t.Fatalf("Failed to register tool: %v", err)
-	}
+		// Register a test tool
+		inputSchema := map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"param1": map[string]interface{}{
+					"type":        "string",
+					"description": "A test parameter",
+				},
+			},
+			"required": []string{"param1"},
+		}
+		schemaBytes, err := types.NewToolInputSchema(inputSchema)
+		if err != nil {
+			t.Fatalf("Failed to create input schema: %v", err)
+		}
 
-	handler := func(ctx context.Context, params map[string]interface{}) (*types.ToolResult, error) {
-		result, err := types.NewToolResult(map[string]interface{}{
-			"output": params["param1"],
+		err = s.RegisterTool(types.Tool{
+			Name:        "test_tool",
+			Description: "A test tool",
+			InputSchema: schemaBytes,
 		})
 		if err != nil {
-			return nil, err
+			t.Fatalf("Failed to register tool: %v", err)
 		}
-		return result, nil
-	}
-	if err := s.RegisterToolHandler("test_tool", handler); err != nil {
-		t.Fatalf("Failed to register handler: %v", err)
-	}
 
-	// Test tool execution without validation
-	t.Run("Tool Execution Without Validation", func(t *testing.T) {
-		ctx := context.Background()
+		// Register tool handler
+		err = s.RegisterToolHandler("test_tool", func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
+			output := "test value"
+			if val, ok := params["param1"].(string); ok {
+				output = val
+			}
+			return types.NewToolResult(map[string]interface{}{
+				"content": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": output,
+					},
+				},
+				"isError": false,
+			})
+		})
+		if err != nil {
+			t.Fatalf("Failed to register tool handler: %v", err)
+		}
 
-		// Test with invalid parameters (should still work)
-		result, err := s.HandleToolCall(ctx, types.ToolCall{
+		// Test tool execution without validation
+		result, err := s.HandleToolCall(context.Background(), types.ToolCall{
 			Name: "test_tool",
 			Parameters: map[string]interface{}{
-				"invalid_param": "test",
+				"param1": "test value",
+				"param2": 123, // This would normally fail validation
 			},
 		})
+
 		if err != nil {
-			t.Errorf("Expected success with validation disabled, got error: %v", err)
+			t.Errorf("Expected no error with validation disabled, got %v", err)
+			return
+		}
+		if result == nil {
+			t.Error("Expected non-nil result with validation disabled")
+			return
+		}
+		if result.Result == nil {
+			t.Error("Expected non-nil result.Result with validation disabled")
+			return
 		}
 
-		// Check result
-		var resultMap map[string]interface{}
-		if err := json.Unmarshal(result.Result, &resultMap); err != nil {
-			t.Fatalf("Failed to unmarshal result: %v", err)
+		// Verify that the handler still works with the valid parameter
+		var resultMap struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
 		}
-		if resultMap["output"] != nil {
-			t.Error("Expected nil output with invalid parameter")
+		if err := json.Unmarshal(result.Result, &resultMap); err != nil {
+			t.Errorf("Failed to unmarshal result: %v", err)
+			return
+		}
+		if len(resultMap.Content) == 0 {
+			t.Error("Expected non-empty content")
+		} else if resultMap.Content[0].Text != "test value" {
+			t.Errorf("Expected output 'test value', got %v", resultMap.Content[0].Text)
 		}
 	})
 }

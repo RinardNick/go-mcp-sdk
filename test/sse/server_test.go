@@ -70,7 +70,7 @@ func TestSSEServer(t *testing.T) {
 	toolCall := types.ToolCall{
 		Name: "test_tool",
 		Parameters: map[string]interface{}{
-			"param1": "test value",
+			"param1": "test",
 		},
 	}
 

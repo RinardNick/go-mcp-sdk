@@ -43,12 +43,34 @@ func TestStdioClient(t *testing.T) {
 	defer cmd.Process.Kill()
 
 	// Create stdio client
-	client := stdio.NewClient(stdin, stdout)
+	client := stdio.NewStdioClient(stdin, stdout)
+
+	// Set initialization parameters
+	client.SetInitializeParams(&types.InitializeParams{
+		ProtocolVersion: "0.1.0",
+		ClientInfo: types.Implementation{
+			Name:    "go-mcp-sdk",
+			Version: "1.0.0",
+		},
+		Capabilities: types.ClientCapabilities{
+			Tools: &types.ToolCapabilities{
+				SupportsProgress:     true,
+				SupportsCancellation: true,
+			},
+		},
+	})
 
 	// Copy server stderr to os.Stderr for debugging
 	go func() {
 		io.Copy(os.Stderr, stderr)
 	}()
+
+	// Initialize the client
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize client: %v", err)
+	}
 
 	// Test cases
 	t.Run("Basic RPC", func(t *testing.T) {
@@ -83,18 +105,25 @@ func TestStdioClient(t *testing.T) {
 			t.Fatalf("ExecuteTool failed: %v", err)
 		}
 
-		var resultMap map[string]interface{}
+		var resultMap struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		}
 		if err := json.Unmarshal(result.Result, &resultMap); err != nil {
 			t.Fatalf("Failed to unmarshal result: %v", err)
 		}
 
-		output, ok := resultMap["output"].(string)
-		if !ok {
-			t.Fatal("Expected string output in result")
+		if len(resultMap.Content) == 0 {
+			t.Fatal("Expected non-empty content")
 		}
-
-		if output != "test output" {
-			t.Errorf("Expected output 'test output', got '%s'", output)
+		if resultMap.Content[0].Text != "test output" {
+			t.Errorf("Expected output 'test output', got '%s'", resultMap.Content[0].Text)
+		}
+		if resultMap.IsError {
+			t.Error("Expected isError to be false")
 		}
 	})
 

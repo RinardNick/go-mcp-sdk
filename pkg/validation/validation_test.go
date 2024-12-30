@@ -146,11 +146,15 @@ func TestValidateParameters(t *testing.T) {
 				"details": map[string]any{"key": "value"},
 			},
 			schemas: map[string]any{
-				"name":    map[string]any{"type": "string", "required": true},
-				"age":     map[string]any{"type": "number"},
-				"active":  map[string]any{"type": "boolean"},
-				"tags":    map[string]any{"type": "array"},
-				"details": map[string]any{"type": "object"},
+				"type": "object",
+				"properties": map[string]any{
+					"name":    map[string]any{"type": "string", "required": true},
+					"age":     map[string]any{"type": "number"},
+					"active":  map[string]any{"type": "boolean"},
+					"tags":    map[string]any{"type": "array"},
+					"details": map[string]any{"type": "object"},
+				},
+				"required": []any{"name"},
 			},
 			wantErr: false,
 		},
@@ -160,8 +164,12 @@ func TestValidateParameters(t *testing.T) {
 				"age": 30,
 			},
 			schemas: map[string]any{
-				"name": map[string]any{"type": "string", "required": true},
-				"age":  map[string]any{"type": "number"},
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string"},
+					"age":  map[string]any{"type": "number"},
+				},
+				"required": []any{"name"},
 			},
 			wantErr: true,
 		},
@@ -171,7 +179,10 @@ func TestValidateParameters(t *testing.T) {
 				"unknown": "value",
 			},
 			schemas: map[string]any{
-				"name": map[string]any{"type": "string"},
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string"},
+				},
 			},
 			wantErr: true,
 		},
@@ -181,7 +192,10 @@ func TestValidateParameters(t *testing.T) {
 				"name": 123,
 			},
 			schemas: map[string]any{
-				"name": map[string]any{"type": "string"},
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string"},
+				},
 			},
 			wantErr: true,
 		},

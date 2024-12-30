@@ -330,15 +330,17 @@ func (c *SSEClient) SendRequest(ctx context.Context, method string, params inter
 func (c *SSEClient) Initialize(ctx context.Context) error {
 	params := types.InitializeParams{
 		ProtocolVersion: "0.1.0",
-		ClientInfo: types.ClientInfo{
+		ClientInfo: types.Implementation{
 			Name:    "go-mcp-sdk",
-			Version: "0.1.0",
+			Version: "1.0.0",
 		},
 		Capabilities: types.ClientCapabilities{
 			Tools: &types.ToolCapabilities{
 				SupportsProgress:     true,
 				SupportsCancellation: true,
 			},
+			Experimental: make(map[string]interface{}),
+			Sampling:     make(map[string]interface{}),
 		},
 	}
 

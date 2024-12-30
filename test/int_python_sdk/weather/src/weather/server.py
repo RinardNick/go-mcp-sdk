@@ -1,7 +1,8 @@
 from typing import Any
 import asyncio
 import httpx
-from mcp.server.models import InitializationOptions
+from mcp.server.models import InitializationOptions, ServerCapabilities
+from mcp.types import ToolsCapability
 import mcp.types as types
 from mcp.server import NotificationOptions, Server
 import mcp.server.stdio
@@ -15,7 +16,7 @@ server = Server("weather")
 async def handle_list_tools() -> list[types.Tool]:
     """
     List available tools.
-    Each tool specifies its arguments using JSON Schema validation.
+    Each tool specifies its parameters using JSON Schema validation.
     """
     return [
         types.Tool(
@@ -52,32 +53,24 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
     ]
 
-async def make_nws_request(client: httpx.AsyncClient, url: str) -> dict[str, Any] | None:
-    """Make a request to the NWS API with proper error handling."""
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Accept": "application/geo+json"
-    }
-
+async def make_nws_request(client: httpx.AsyncClient, url: str) -> dict | None:
+    """
+    Make a request to the NWS API with proper headers and error handling.
+    """
     try:
-        response = await client.get(url, headers=headers, timeout=30.0)
+        response = await client.get(url, headers={"User-Agent": USER_AGENT})
         response.raise_for_status()
         return response.json()
-    except Exception:
+    except (httpx.HTTPError, ValueError) as e:
+        print(f"Error making request to {url}: {e}")
         return None
 
-def format_alert(feature: dict) -> str:
-    """Format an alert feature into a concise string."""
-    props = feature["properties"]
-    return (
-        f"Event: {props.get('event', 'Unknown')}\n"
-        f"Area: {props.get('areaDesc', 'Unknown')}\n"
-        f"Severity: {props.get('severity', 'Unknown')}\n"
-        f"Status: {props.get('status', 'Unknown')}\n"
-        f"Headline: {props.get('headline', 'No headline')}\n"
-        "---"
-    )
-
+def format_alert(alert: dict) -> str:
+    """
+    Format an alert into a concise string.
+    """
+    properties = alert.get("properties", {})
+    return f"{properties.get('event', 'Unknown Event')} - {properties.get('headline', 'No details available')}"
 
 @server.call_tool()
 async def handle_call_tool(
@@ -148,16 +141,13 @@ async def handle_call_tool(
             if not points_data:
                 return [types.TextContent(type="text", text=f"Failed to retrieve grid point data for coordinates: {latitude}, {longitude}. This location may not be supported by the NWS API (only US locations are supported).")]
 
-            # Extract forecast URL from the response
-            properties = points_data.get("properties", {})
-            forecast_url = properties.get("forecast")
-            
+            # Get the forecast URL from the points response
+            forecast_url = points_data.get("properties", {}).get("forecast")
             if not forecast_url:
-                return [types.TextContent(type="text", text="Failed to get forecast URL from grid point data")]
+                return [types.TextContent(type="text", text="No forecast available for this location")]
 
-            # Get the forecast
+            # Get the forecast data
             forecast_data = await make_nws_request(client, forecast_url)
-            
             if not forecast_data:
                 return [types.TextContent(type="text", text="Failed to retrieve forecast data")]
 
@@ -166,24 +156,17 @@ async def handle_call_tool(
             if not periods:
                 return [types.TextContent(type="text", text="No forecast periods available")]
 
-            # Format each period into a concise string
-            formatted_forecast = []
-            for period in periods:
-                forecast_text = (
-                    f"{period.get('name', 'Unknown')}:\n"
-                    f"Temperature: {period.get('temperature', 'Unknown')}°{period.get('temperatureUnit', 'F')}\n"
-                    f"Wind: {period.get('windSpeed', 'Unknown')} {period.get('windDirection', '')}\n"
-                    f"{period.get('shortForecast', 'No forecast available')}\n"
-                    "---"
-                )
-                formatted_forecast.append(forecast_text)
+            # Format the forecast into a readable string
+            forecast_text = "Weather Forecast:\n\n"
+            for period in periods[:10]:  # Only show next 10 periods
+                forecast_text += f"{period.get('name', 'Unknown')}:\n"
+                forecast_text += f"Temperature: {period.get('temperature', 'N/A')}°{period.get('temperatureUnit', 'F')}\n"
+                forecast_text += f"Conditions: {period.get('shortForecast', 'N/A')}\n"
+                forecast_text += f"Details: {period.get('detailedForecast', 'N/A')}\n"
+                forecast_text += "---\n"
 
-            forecast_text = f"Forecast for {latitude}, {longitude}:\n\n" + "\n".join(formatted_forecast)
+            return [types.TextContent(type="text", text=forecast_text)]
 
-            return [types.TextContent(
-                type="text",
-                text=forecast_text
-            )]
     else:
         raise ValueError(f"Unknown tool: {name}")
 
@@ -196,10 +179,9 @@ async def main():
             InitializationOptions(
                 server_name="weather",
                 server_version="0.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
+                capabilities=ServerCapabilities(
+                    tools=ToolsCapability(listChanged=False)
+                )
             ),
         )
 

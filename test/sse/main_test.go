@@ -67,8 +67,12 @@ func TestSSEClient(t *testing.T) {
 					"result": map[string]interface{}{
 						"resources": []types.Resource{
 							{
-								URI:  "test://resource",
-								Name: "test_resource",
+								ID:          "test_resource",
+								Name:        "test_resource",
+								Description: "A test resource",
+								Type:        "test",
+								URI:         "test://resource",
+								Metadata:    map[string]interface{}{},
 							},
 						},
 					},
@@ -156,12 +160,14 @@ func TestSSEClient(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		result, err := client.ExecuteTool(ctx, types.ToolCall{
+		toolCall := types.ToolCall{
 			Name: "test_tool",
-			Parameters: map[string]any{
+			Parameters: map[string]interface{}{
 				"param1": "test",
 			},
-		})
+		}
+
+		result, err := client.ExecuteTool(ctx, toolCall)
 		if err != nil {
 			t.Fatalf("ExecuteTool failed: %v", err)
 		}
