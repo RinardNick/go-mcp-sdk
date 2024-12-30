@@ -306,37 +306,39 @@ func (s *BaseServer) validateInitializeParams(params types.InitializeParams) err
 
 // HandleInitialize handles an initialization request
 func (s *BaseServer) HandleInitialize(ctx context.Context, params types.InitializeParams) (*types.InitializeResult, error) {
-	// Validate initialization params
+	// First check if the version is supported
+	supportedVersions := append([]string{s.options.Version}, s.options.SupportedVersions...)
+	versionSupported := false
+
+	// Check exact matches first
+	for _, version := range supportedVersions {
+		if params.ProtocolVersion == version {
+			versionSupported = true
+			break
+		}
+	}
+
+	// Check date-based versions if no exact match
+	if !versionSupported && len(params.ProtocolVersion) == 10 &&
+		params.ProtocolVersion[4] == '-' && params.ProtocolVersion[7] == '-' {
+		year := params.ProtocolVersion[0:4]
+		if year >= "2024" && year <= "2025" {
+			versionSupported = true
+		}
+	}
+
+	if !versionSupported {
+		errMsg := fmt.Sprintf("unsupported protocol version: %s. Supported versions: %v",
+			params.ProtocolVersion, supportedVersions)
+		return nil, types.NewMCPError(types.ErrInvalidParams, "Invalid params", errMsg)
+	}
+
+	// Validate other initialization params
 	if err := s.validateInitializeParams(params); err != nil {
 		return nil, types.InvalidParamsError(err.Error())
 	}
 
-	// First try exact version match
-	if params.ProtocolVersion == s.options.Version {
-		return s.createInitializeResult(s.options.Version), nil
-	}
-
-	// If we have supported versions, try to find a match
-	if len(s.options.SupportedVersions) > 0 {
-		for _, version := range s.options.SupportedVersions {
-			if params.ProtocolVersion == version {
-				return s.createInitializeResult(version), nil
-			}
-		}
-	}
-
-	// Check if the requested version is a date-based version (YYYY-MM-DD)
-	if len(params.ProtocolVersion) == 10 && params.ProtocolVersion[4] == '-' && params.ProtocolVersion[7] == '-' {
-		// Only accept date-based versions if they are in a reasonable range
-		year := params.ProtocolVersion[0:4]
-		if year >= "2024" && year <= "2025" {
-			return s.createInitializeResult(params.ProtocolVersion), nil
-		}
-	}
-
-	// If we get here, the version is not supported
-	supportedVersions := append([]string{s.options.Version}, s.options.SupportedVersions...)
-	return nil, types.InvalidParamsError(fmt.Sprintf("unsupported protocol version: %s. Supported versions: %v", params.ProtocolVersion, supportedVersions))
+	return s.createInitializeResult(params.ProtocolVersion), nil
 }
 
 // createInitializeResult creates an initialization result with the given version
