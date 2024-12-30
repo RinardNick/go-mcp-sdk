@@ -511,4 +511,252 @@ func TestErrorHandling(t *testing.T) {
 			t.Error(err)
 		}
 	})
+
+	t.Run("Recovery after errors", func(t *testing.T) {
+		s := server.NewServer(&server.InitializationOptions{
+			Version: "1.0",
+		})
+
+		// Register a test tool that can fail
+		err := s.RegisterTool(types.Tool{
+			Name:        "failing_tool",
+			Description: "A tool that can fail",
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"shouldFail": {
+						"type": "boolean",
+						"description": "Whether the tool should fail"
+					}
+				},
+				"required": ["shouldFail"]
+			}`),
+		})
+		if err != nil {
+			t.Fatalf("Failed to register tool: %v", err)
+		}
+
+		// Register tool handler that can fail
+		err = s.RegisterToolHandler("failing_tool", func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
+			shouldFail, _ := params["shouldFail"].(bool)
+			if shouldFail {
+				return nil, fmt.Errorf("intentional failure")
+			}
+			return types.NewToolResult(map[string]interface{}{
+				"output": "success",
+			})
+		})
+		if err != nil {
+			t.Fatalf("Failed to register tool handler: %v", err)
+		}
+
+		// Test sequence of calls with failures and recoveries
+		testCases := []struct {
+			name       string
+			shouldFail bool
+			wantError  bool
+		}{
+			{"First call - success", false, false},
+			{"Second call - fail", true, true},
+			{"Third call - recover", false, false},
+			{"Fourth call - fail again", true, true},
+			{"Fifth call - recover again", false, false},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				result, err := s.HandleToolCall(context.Background(), types.ToolCall{
+					Name: "failing_tool",
+					Parameters: map[string]interface{}{
+						"shouldFail": tc.shouldFail,
+					},
+				})
+
+				if tc.wantError {
+					if err == nil {
+						t.Error("Expected error, got nil")
+					}
+					if result != nil {
+						t.Errorf("Expected nil result when error occurs, got %v", result)
+					}
+				} else {
+					if err != nil {
+						t.Errorf("Expected no error, got %v", err)
+					}
+					if result == nil {
+						t.Error("Expected result, got nil")
+					}
+				}
+
+				// Verify server state is still valid
+				tools := s.GetTools()
+				if len(tools) != 1 {
+					t.Errorf("Expected 1 tool, got %d", len(tools))
+				}
+				if tools[0].Name != "failing_tool" {
+					t.Errorf("Expected tool name 'failing_tool', got %q", tools[0].Name)
+				}
+			})
+		}
+
+		// Test recovery after invalid JSON
+		_, err = s.HandleToolCall(context.Background(), types.ToolCall{
+			Name: "failing_tool",
+			Parameters: map[string]interface{}{
+				"shouldFail": "invalid_boolean", // Type error
+			},
+		})
+		if err == nil {
+			t.Error("Expected error for invalid parameter type, got nil")
+		}
+
+		// Verify server can still handle valid requests
+		result, err := s.HandleToolCall(context.Background(), types.ToolCall{
+			Name: "failing_tool",
+			Parameters: map[string]interface{}{
+				"shouldFail": false,
+			},
+		})
+		if err != nil {
+			t.Errorf("Expected successful recovery after invalid JSON, got error: %v", err)
+		}
+		if result == nil {
+			t.Error("Expected result after recovery, got nil")
+		}
+
+		// Test recovery after panic in tool handler
+		err = s.RegisterToolHandler("failing_tool", func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
+			shouldFail, _ := params["shouldFail"].(bool)
+			if shouldFail {
+				panic("intentional panic")
+			}
+			return types.NewToolResult(map[string]interface{}{
+				"output": "success",
+			})
+		})
+		if err != nil {
+			t.Fatalf("Failed to update tool handler: %v", err)
+		}
+
+		// Trigger panic
+		_, err = s.HandleToolCall(context.Background(), types.ToolCall{
+			Name: "failing_tool",
+			Parameters: map[string]interface{}{
+				"shouldFail": true,
+			},
+		})
+		if err == nil {
+			t.Error("Expected error after panic, got nil")
+		}
+
+		// Verify recovery after panic
+		result, err = s.HandleToolCall(context.Background(), types.ToolCall{
+			Name: "failing_tool",
+			Parameters: map[string]interface{}{
+				"shouldFail": false,
+			},
+		})
+		if err != nil {
+			t.Errorf("Expected successful recovery after panic, got error: %v", err)
+		}
+		if result == nil {
+			t.Error("Expected result after panic recovery, got nil")
+		}
+	})
+
+	t.Run("Error propagation in streaming", func(t *testing.T) {
+		s := server.NewServer(&server.InitializationOptions{
+			Version: "1.0",
+		})
+
+		// Register a streaming tool that can fail
+		err := s.RegisterTool(types.Tool{
+			Name:        "streaming_tool",
+			Description: "A streaming tool that can fail",
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"shouldFail": {
+						"type": "boolean",
+						"description": "Whether the operation should fail"
+					}
+				},
+				"required": ["shouldFail"]
+			}`),
+		})
+		if err != nil {
+			t.Fatalf("Failed to register tool: %v", err)
+		}
+
+		// Register streaming tool handler
+		err = s.RegisterToolHandler("streaming_tool", func(ctx context.Context, params map[string]any) (*types.ToolResult, error) {
+			shouldFail, _ := params["shouldFail"].(bool)
+
+			if shouldFail {
+				return nil, fmt.Errorf("streaming operation failed")
+			}
+
+			content := map[string]interface{}{
+				"content": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": "streaming completed",
+					},
+				},
+			}
+			contentBytes, err := json.Marshal(content)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal content: %v", err)
+			}
+
+			return &types.ToolResult{
+				Result: contentBytes,
+			}, nil
+		})
+		if err != nil {
+			t.Fatalf("Failed to register tool handler: %v", err)
+		}
+
+		testCases := []struct {
+			name       string
+			shouldFail bool
+			wantError  bool
+		}{
+			{
+				name:       "No failure",
+				shouldFail: false,
+				wantError:  false,
+			},
+			{
+				name:       "Streaming fails",
+				shouldFail: true,
+				wantError:  true,
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx := context.Background()
+				result, err := s.HandleToolCall(ctx, types.ToolCall{
+					Name: "streaming_tool",
+					Parameters: map[string]interface{}{
+						"shouldFail": tc.shouldFail,
+					},
+				})
+
+				if tc.wantError {
+					if err == nil {
+						t.Error("Expected error, got nil")
+					}
+				} else {
+					if err != nil {
+						t.Errorf("Expected no error, got %v", err)
+					}
+					if result == nil {
+						t.Error("Expected result, got nil")
+					}
+				}
+			})
+		}
+	})
 }

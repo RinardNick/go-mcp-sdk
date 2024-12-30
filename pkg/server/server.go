@@ -149,25 +149,30 @@ func (s *BaseServer) RegisterTool(tool types.Tool) error {
 	return nil
 }
 
-// RegisterToolHandler registers a handler for a tool
+// RegisterToolHandler registers a handler for a tool with validation
 func (s *BaseServer) RegisterToolHandler(name string, handler ToolHandler) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if name == "" {
-		return types.InvalidParamsError("tool name cannot be empty")
-	}
-	if handler == nil {
-		return types.InvalidParamsError("handler cannot be nil")
-	}
-	if _, exists := s.tools[name]; !exists {
-		return types.InvalidParamsError("tool not registered")
-	}
-	if _, exists := s.handlers[name]; exists {
-		return types.InvalidParamsError("handler already registered for tool")
+	// Verify tool exists
+	if _, ok := s.tools[name]; !ok {
+		return types.InvalidParamsError(fmt.Sprintf("tool not found: %s", name))
 	}
 
-	s.handlers[name] = handler
+	// Wrap handler with validation and recovery
+	wrappedHandler := func(ctx context.Context, params map[string]any) (result *types.ToolResult, err error) {
+		// Defer panic recovery
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("tool handler panic: %v", r)
+				result = nil
+			}
+		}()
+
+		return handler(ctx, params)
+	}
+
+	s.handlers[name] = wrappedHandler
 	return nil
 }
 
@@ -395,7 +400,15 @@ func (s *BaseServer) validateMessage(data []byte) error {
 }
 
 // HandleToolCall handles a tool call request
-func (s *BaseServer) HandleToolCall(ctx context.Context, call types.ToolCall) (*types.ToolResult, error) {
+func (s *BaseServer) HandleToolCall(ctx context.Context, call types.ToolCall) (result *types.ToolResult, err error) {
+	// Defer panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("tool execution panic: %v", r)
+			result = nil
+		}
+	}()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -437,8 +450,8 @@ func (s *BaseServer) HandleToolCall(ctx context.Context, call types.ToolCall) (*
 		}
 	}
 
-	// Execute tool
-	result, err := handler(ctx, call.Parameters)
+	// Execute tool with panic recovery
+	result, err = handler(ctx, call.Parameters)
 	if err != nil {
 		return nil, fmt.Errorf("tool execution failed: %w", err)
 	}
