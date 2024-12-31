@@ -5,12 +5,12 @@ import (
 	"fmt"
 )
 
-// ClientCapabilities represents the capabilities of the client
+// ClientCapabilities represents client capabilities
 type ClientCapabilities struct {
-	Tools *ToolCapabilities `json:"tools,omitempty"`
+	Tools *ToolCapabilities `json:"tools"`
 }
 
-// ToolCapabilities represents the tool-related capabilities of the client
+// ToolCapabilities represents tool-related capabilities
 type ToolCapabilities struct {
 	SupportsProgress     bool `json:"supportsProgress"`
 	SupportsCancellation bool `json:"supportsCancellation"`
@@ -21,13 +21,13 @@ type RootsCapability struct {
 	ListChanged bool `json:"list_changed,omitempty"`
 }
 
-// Implementation represents information about a client or server implementation
+// Implementation represents a client or server implementation
 type Implementation struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
 
-// InitializeParams represents the parameters for the initialize request
+// InitializeParams represents client initialization parameters
 type InitializeParams struct {
 	ProtocolVersion string             `json:"protocolVersion"`
 	ClientInfo      Implementation     `json:"clientInfo"`
@@ -36,8 +36,8 @@ type InitializeParams struct {
 
 // ClientInfo represents information about the client
 type ClientInfo struct {
-	Name    string `json:"client_name"`
-	Version string `json:"client_version"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // Tool represents a tool that can be executed
@@ -45,7 +45,8 @@ type Tool struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	Parameters  map[string]interface{} `json:"parameters"`
-	InputSchema json.RawMessage        `json:"inputSchema"`
+	InputSchema json.RawMessage        `json:"input_schema,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // NewToolInputSchema creates a new json.RawMessage from a map
@@ -179,7 +180,7 @@ func (e *ParseError) Error() string {
 
 // Progress represents a progress notification from a tool
 type Progress struct {
-	ToolID  string `json:"toolId"`
+	ToolID  string `json:"tool_id,toolId"`
 	Current int    `json:"current"`
 	Total   int    `json:"total"`
 	Message string `json:"message"`
@@ -201,15 +202,15 @@ type ProgressNotification struct {
 
 // ServerInfo represents information about the server
 type ServerInfo struct {
-	Name    string `json:"server_name"`
-	Version string `json:"server_version"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // InitializeResult represents the result of initialization
 type InitializeResult struct {
-	ProtocolVersion string             `json:"protocol_version"`
+	ProtocolVersion string             `json:"protocol_version,protocolVersion"`
 	Capabilities    ServerCapabilities `json:"capabilities"`
-	ServerInfo      Implementation     `json:"server_info"`
+	ServerInfo      Implementation     `json:"server_info,serverInfo"`
 }
 
 // InitializationOptions represents server initialization options
@@ -264,7 +265,7 @@ type ServerCapabilities struct {
 
 // ToolsCapability represents the tool-related capabilities of the server
 type ToolsCapability struct {
-	ListChanged bool `json:"list_changed"`
+	ListChanged bool `json:"list_changed,listChanged"`
 }
 
 // LoggingCapability represents logging capabilities
@@ -279,4 +280,144 @@ type PromptsCapability struct {
 type ResourcesCapability struct {
 	Subscribe   bool `json:"subscribe,omitempty"`
 	ListChanged bool `json:"list_changed,omitempty"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler for Implementation
+func (i *Implementation) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Try name
+	if name, ok := raw["name"]; ok {
+		if err := json.Unmarshal(name, &i.Name); err != nil {
+			return err
+		}
+	}
+
+	// Try version
+	if version, ok := raw["version"]; ok {
+		if err := json.Unmarshal(version, &i.Version); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler for InitializeParams
+func (p *InitializeParams) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Try protocol version
+	if pv, ok := raw["protocol_version"]; ok {
+		if err := json.Unmarshal(pv, &p.ProtocolVersion); err != nil {
+			return err
+		}
+	} else if pv, ok := raw["protocolVersion"]; ok {
+		if err := json.Unmarshal(pv, &p.ProtocolVersion); err != nil {
+			return err
+		}
+	}
+
+	// Try client info
+	if ci, ok := raw["client_info"]; ok {
+		if err := json.Unmarshal(ci, &p.ClientInfo); err != nil {
+			return err
+		}
+	} else if ci, ok := raw["clientInfo"]; ok {
+		if err := json.Unmarshal(ci, &p.ClientInfo); err != nil {
+			return err
+		}
+	}
+
+	// Try capabilities
+	if cap, ok := raw["capabilities"]; ok {
+		if err := json.Unmarshal(cap, &p.Capabilities); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler for ToolCapabilities
+func (tc *ToolCapabilities) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Try supports progress
+	if sp, ok := raw["supports_progress"]; ok {
+		if err := json.Unmarshal(sp, &tc.SupportsProgress); err != nil {
+			return err
+		}
+	} else if sp, ok := raw["supportsProgress"]; ok {
+		if err := json.Unmarshal(sp, &tc.SupportsProgress); err != nil {
+			return err
+		}
+	}
+
+	// Try supports cancellation
+	if sc, ok := raw["supports_cancellation"]; ok {
+		if err := json.Unmarshal(sc, &tc.SupportsCancellation); err != nil {
+			return err
+		}
+	} else if sc, ok := raw["supportsCancellation"]; ok {
+		if err := json.Unmarshal(sc, &tc.SupportsCancellation); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler for Tool
+func (t *Tool) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Try name
+	if name, ok := raw["name"]; ok {
+		if err := json.Unmarshal(name, &t.Name); err != nil {
+			return err
+		}
+	}
+
+	// Try description
+	if desc, ok := raw["description"]; ok {
+		if err := json.Unmarshal(desc, &t.Description); err != nil {
+			return err
+		}
+	}
+
+	// Try parameters
+	if params, ok := raw["parameters"]; ok {
+		if err := json.Unmarshal(params, &t.Parameters); err != nil {
+			return err
+		}
+	}
+
+	// Try input schema with both snake_case and camelCase
+	if schema, ok := raw["input_schema"]; ok {
+		t.InputSchema = schema
+	} else if schema, ok := raw["inputSchema"]; ok {
+		t.InputSchema = schema
+	}
+
+	// Try metadata
+	if meta, ok := raw["metadata"]; ok {
+		if err := json.Unmarshal(meta, &t.Metadata); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
