@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -463,4 +464,306 @@ func TestWSServer(t *testing.T) {
 	if resultMap.IsError {
 		t.Error("Expected isError to be false")
 	}
+}
+
+func TestWebSocketTransportConnectionAttempts(t *testing.T) {
+	s := server.NewServer(nil)
+	config := &serverws.Config{
+		Address:      ":0",
+		WSPath:       "/ws",
+		PingInterval: 100 * time.Millisecond,
+		PongWait:     200 * time.Millisecond,
+	}
+	transport := serverws.NewTransport(s, config)
+	ctx := context.Background()
+	go transport.Start(ctx)
+	defer transport.Stop()
+
+	// Create test server
+	server := httptest.NewServer(transport.GetHandler())
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+
+	// Test simultaneous connection attempts
+	t.Run("Simultaneous Connection Attempts", func(t *testing.T) {
+		numConnections := 50
+		var wg sync.WaitGroup
+		wg.Add(numConnections)
+
+		// Create a channel to collect errors and successful connections
+		errChan := make(chan error, numConnections)
+		connChan := make(chan *websocket.Conn, numConnections)
+
+		// Start all connections at roughly the same time
+		for i := 0; i < numConnections; i++ {
+			go func(id int) {
+				defer wg.Done()
+
+				conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+				if err != nil {
+					errChan <- fmt.Errorf("connection %d failed: %v", id, err)
+					return
+				}
+				connChan <- conn
+
+				// Send a simple ping to verify connection is working
+				if err := conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+					errChan <- fmt.Errorf("connection %d failed to send ping: %v", id, err)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		close(errChan)
+		close(connChan)
+
+		// Collect all connections
+		var conns []*websocket.Conn
+		for conn := range connChan {
+			conns = append(conns, conn)
+		}
+
+		// Clean up connections at the end
+		defer func() {
+			for _, conn := range conns {
+				conn.Close()
+			}
+		}()
+
+		// Check for connection errors
+		var errors []error
+		for err := range errChan {
+			errors = append(errors, err)
+		}
+
+		if len(errors) > 0 {
+			for _, err := range errors {
+				t.Error(err)
+			}
+		}
+
+		// Wait a bit for connection states to stabilize
+		time.Sleep(100 * time.Millisecond)
+
+		// Verify connection states
+		states := transport.GetConnectionStates()
+		if len(states) != len(conns) {
+			t.Errorf("Expected %d connections, got %d", len(conns), len(states))
+		}
+		for _, state := range states {
+			if state != serverws.StateConnected {
+				t.Errorf("Expected state %s, got %s", serverws.StateConnected, state)
+			}
+		}
+	})
+
+	// Test connection attempts during high load
+	t.Run("Connection Attempts During High Load", func(t *testing.T) {
+		// Create initial connections to generate load
+		numInitialConns := 20
+		initialConns := make([]*websocket.Conn, 0, numInitialConns)
+		for i := 0; i < numInitialConns; i++ {
+			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			if err != nil {
+				t.Fatalf("Failed to create initial connection %d: %v", i, err)
+			}
+			initialConns = append(initialConns, conn)
+		}
+		defer func() {
+			for _, conn := range initialConns {
+				conn.Close()
+			}
+		}()
+
+		// Generate load by sending messages on all connections
+		var wg sync.WaitGroup
+		for _, conn := range initialConns {
+			wg.Add(1)
+			go func(c *websocket.Conn) {
+				defer wg.Done()
+				for i := 0; i < 100; i++ {
+					if err := c.WriteMessage(websocket.TextMessage, []byte("test message")); err != nil {
+						return
+					}
+					time.Sleep(time.Millisecond)
+				}
+			}(conn)
+		}
+
+		// Try to establish new connections while under load
+		numNewConns := 10
+		newConns := make([]*websocket.Conn, 0, numNewConns)
+		errChan := make(chan error, numNewConns)
+		connChan := make(chan *websocket.Conn, numNewConns)
+
+		var connWg sync.WaitGroup
+		connWg.Add(numNewConns)
+		for i := 0; i < numNewConns; i++ {
+			go func(id int) {
+				defer connWg.Done()
+				conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+				if err != nil {
+					errChan <- fmt.Errorf("new connection %d failed: %v", id, err)
+					return
+				}
+				connChan <- conn
+			}(i)
+		}
+
+		connWg.Wait()
+		close(errChan)
+		close(connChan)
+
+		// Collect new connections
+		for conn := range connChan {
+			newConns = append(newConns, conn)
+		}
+
+		// Wait for load generation to complete
+		wg.Wait()
+
+		// Check for connection errors
+		var errors []error
+		for err := range errChan {
+			errors = append(errors, err)
+		}
+
+		if len(errors) > 0 {
+			for _, err := range errors {
+				t.Error(err)
+			}
+		}
+
+		// Clean up new connections
+		for _, conn := range newConns {
+			conn.Close()
+		}
+	})
+
+	// Test connection attempts during shutdown
+	t.Run("Connection Attempts During Shutdown", func(t *testing.T) {
+		// Create some initial connections
+		numInitialConns := 5
+		initialConns := make([]*websocket.Conn, 0, numInitialConns)
+		for i := 0; i < numInitialConns; i++ {
+			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			if err != nil {
+				t.Fatalf("Failed to create initial connection %d: %v", i, err)
+			}
+			initialConns = append(initialConns, conn)
+		}
+
+		// Start shutdown
+		shutdownStarted := make(chan struct{})
+		shutdownComplete := make(chan struct{})
+		go func() {
+			close(shutdownStarted)
+			transport.Stop()
+			close(shutdownComplete)
+		}()
+
+		<-shutdownStarted
+
+		// Try to connect during shutdown
+		var wg sync.WaitGroup
+		numAttempts := 5
+		wg.Add(numAttempts)
+		errChan := make(chan error, numAttempts)
+
+		for i := 0; i < numAttempts; i++ {
+			go func(id int) {
+				defer wg.Done()
+				conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+				if err == nil {
+					conn.Close()
+					errChan <- fmt.Errorf("connection %d succeeded during shutdown", id)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		<-shutdownComplete
+
+		// Wait a bit for connections to fully close
+		time.Sleep(100 * time.Millisecond)
+
+		// Clean up initial connections
+		for _, conn := range initialConns {
+			conn.Close()
+		}
+
+		close(errChan)
+
+		// We expect some connection attempts to fail during shutdown
+		errors := make([]error, 0)
+		for err := range errChan {
+			errors = append(errors, err)
+		}
+
+		// Verify no connections are left
+		states := transport.GetConnectionStates()
+		if len(states) != 0 {
+			t.Errorf("Expected 0 connections after shutdown, got %d", len(states))
+		}
+	})
+
+	// Test connection attempts with invalid parameters
+	t.Run("Connection Attempts With Invalid Parameters", func(t *testing.T) {
+		// Create an HTTP client that doesn't follow redirects
+		client := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+
+		// Test cases for invalid connection attempts
+		testCases := []struct {
+			name    string
+			headers http.Header
+			path    string
+		}{
+			{
+				name:    "Invalid WebSocket Version",
+				headers: http.Header{"Sec-WebSocket-Version": []string{"1"}},
+				path:    "/ws",
+			},
+			{
+				name:    "Missing Upgrade Header",
+				headers: http.Header{},
+				path:    "/ws",
+			},
+			{
+				name:    "Invalid Path",
+				headers: http.Header{"Upgrade": []string{"websocket"}},
+				path:    "/invalid",
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				url := "http" + strings.TrimPrefix(server.URL, "http") + tc.path
+				req, err := http.NewRequest("GET", url, nil)
+				if err != nil {
+					t.Fatalf("Failed to create request: %v", err)
+				}
+
+				// Add headers
+				for k, v := range tc.headers {
+					req.Header[k] = v
+				}
+
+				resp, err := client.Do(req)
+				if err != nil {
+					t.Fatalf("Request failed: %v", err)
+				}
+				defer resp.Body.Close()
+
+				// All invalid attempts should fail
+				if resp.StatusCode < 400 {
+					t.Errorf("Expected error status code, got %d", resp.StatusCode)
+				}
+			})
+		}
+	})
 }
