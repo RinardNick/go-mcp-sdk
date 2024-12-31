@@ -48,13 +48,20 @@ func (c *StdioClient) OnProgress(handler types.ProgressHandler) {
 // handleNotification processes notifications from the server
 func (c *StdioClient) handleNotification(notification types.Notification) error {
 	switch notification.Method {
-	case "notifications/progress":
+	case "progress":
 		if c.progressHandler != nil {
 			var progressNotif types.ProgressNotification
 			if err := json.Unmarshal(notification.Params, &progressNotif); err != nil {
 				return fmt.Errorf("failed to unmarshal progress notification: %w", err)
 			}
 			c.progressHandler(progressNotif.Progress)
+		}
+	default:
+		// Forward notification to channel for other handlers
+		select {
+		case c.notificationChan <- notification:
+		default:
+			// Drop notification if channel is full
 		}
 	}
 	return nil

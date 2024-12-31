@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"syscall"
+	"time"
 
 	"github.com/RinardNick/go-mcp-sdk/pkg/types"
 )
@@ -74,11 +75,36 @@ func handleRequest(req request) *types.Response {
 			resp.Error = types.InternalError(err)
 			return resp
 		}
+
+		// Add long_operation tool
+		longOpSchema := map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"steps": map[string]interface{}{
+					"type":        "integer",
+					"description": "Number of steps in the operation",
+					"minimum":     1,
+					"maximum":     10,
+				},
+			},
+			"required": []string{"steps"},
+		}
+		longOpSchemaBytes, err := types.NewToolInputSchema(longOpSchema)
+		if err != nil {
+			resp.Error = types.InternalError(err)
+			return resp
+		}
+
 		tools := []types.Tool{
 			{
 				Name:        "test_tool",
 				Description: "A test tool",
 				InputSchema: schemaBytes,
+			},
+			{
+				Name:        "long_operation",
+				Description: "A long-running operation that reports progress",
+				InputSchema: longOpSchemaBytes,
 			},
 		}
 		result := map[string]interface{}{
@@ -123,6 +149,65 @@ func handleRequest(req request) *types.Response {
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			resp.Error = types.InvalidParamsError(err.Error())
 			break
+		}
+
+		if params.Name == "long_operation" {
+			// Get number of steps
+			stepsRaw, ok := params.Arguments["steps"]
+			if !ok {
+				resp.Error = types.InvalidParamsError("missing steps parameter")
+				break
+			}
+			steps, ok := stepsRaw.(float64)
+			if !ok {
+				resp.Error = types.InvalidParamsError("steps must be a number")
+				break
+			}
+			if steps < 1 || steps > 10 {
+				resp.Error = types.InvalidParamsError("steps must be between 1 and 10")
+				break
+			}
+
+			// Send progress notifications
+			for i := 1; i <= int(steps); i++ {
+				progress := types.Progress{
+					ToolID:  "long_operation",
+					Current: i,
+					Total:   int(steps),
+					Message: fmt.Sprintf("Processing step %d of %d", i, int(steps)),
+				}
+				progressBytes, err := json.Marshal(progress)
+				if err != nil {
+					log.Printf("Error marshaling progress: %v", err)
+					continue
+				}
+				notification := types.Notification{
+					Method: "progress",
+					Params: json.RawMessage(fmt.Sprintf(`{"progress":%s}`, string(progressBytes))),
+				}
+				if err := writeResponse(os.Stdout, notification); err != nil {
+					log.Printf("Error writing progress notification: %v", err)
+				}
+				time.Sleep(100 * time.Millisecond) // Simulate work
+			}
+
+			// Return success result
+			result := map[string]interface{}{
+				"content": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": "Operation completed",
+					},
+				},
+				"isError": false,
+			}
+			resultBytes, err := json.Marshal(result)
+			if err != nil {
+				resp.Error = types.InternalError(err)
+				break
+			}
+			resp.Result = resultBytes
+			return resp
 		}
 
 		if params.Name == "test_tool" {

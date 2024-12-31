@@ -339,8 +339,6 @@ func (c *SSEClient) Initialize(ctx context.Context) error {
 				SupportsProgress:     true,
 				SupportsCancellation: true,
 			},
-			Experimental: make(map[string]interface{}),
-			Sampling:     make(map[string]interface{}),
 		},
 	}
 

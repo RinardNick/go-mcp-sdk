@@ -7,29 +7,27 @@ import (
 
 // ClientCapabilities represents the capabilities of the client
 type ClientCapabilities struct {
-	Tools        *ToolCapabilities      `json:"tools"`
-	Experimental map[string]interface{} `json:"experimental,omitempty"`
-	Sampling     map[string]interface{} `json:"sampling,omitempty"`
+	Tools *ToolCapabilities `json:"tools,omitempty"`
 }
 
-// ToolCapabilities represents the tool-related capabilities
+// ToolCapabilities represents the tool-related capabilities of the client
 type ToolCapabilities struct {
-	SupportsProgress     bool `json:"supports_progress"`
-	SupportsCancellation bool `json:"supports_cancellation"`
+	SupportsProgress     bool `json:"supportsProgress"`
+	SupportsCancellation bool `json:"supportsCancellation"`
 }
 
 // RootsCapability represents the roots capability
 type RootsCapability struct {
-	ListChanged bool `json:"listChanged,omitempty"`
+	ListChanged bool `json:"list_changed,omitempty"`
 }
 
-// Implementation represents information about an MCP implementation
+// Implementation represents information about a client or server implementation
 type Implementation struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
 
-// InitializeParams represents the parameters for initialization
+// InitializeParams represents the parameters for the initialize request
 type InitializeParams struct {
 	ProtocolVersion string             `json:"protocolVersion"`
 	ClientInfo      Implementation     `json:"clientInfo"`
@@ -209,9 +207,9 @@ type ServerInfo struct {
 
 // InitializeResult represents the result of initialization
 type InitializeResult struct {
-	ProtocolVersion string             `json:"protocolVersion"`
+	ProtocolVersion string             `json:"protocol_version"`
 	Capabilities    ServerCapabilities `json:"capabilities"`
-	ServerInfo      Implementation     `json:"serverInfo"`
+	ServerInfo      Implementation     `json:"server_info"`
 }
 
 // InitializationOptions represents server initialization options
@@ -256,7 +254,7 @@ func validateRequiredFields(data map[string]interface{}, required []string) erro
 type Message struct {
 	Role     string    `json:"role"`
 	Content  string    `json:"content"`
-	ToolCall *ToolCall `json:"toolCall,omitempty"`
+	ToolCall *ToolCall `json:"tool_call,omitempty"`
 }
 
 // ServerCapabilities represents the capabilities of the server
@@ -266,7 +264,7 @@ type ServerCapabilities struct {
 
 // ToolsCapability represents the tool-related capabilities of the server
 type ToolsCapability struct {
-	ListChanged bool `json:"listChanged"`
+	ListChanged bool `json:"list_changed"`
 }
 
 // LoggingCapability represents logging capabilities
@@ -274,11 +272,11 @@ type LoggingCapability struct{}
 
 // PromptsCapability represents prompt capabilities
 type PromptsCapability struct {
-	ListChanged bool `json:"listChanged,omitempty"`
+	ListChanged bool `json:"list_changed,omitempty"`
 }
 
 // ResourcesCapability represents resource capabilities
 type ResourcesCapability struct {
 	Subscribe   bool `json:"subscribe,omitempty"`
-	ListChanged bool `json:"listChanged,omitempty"`
+	ListChanged bool `json:"list_changed,omitempty"`
 }
