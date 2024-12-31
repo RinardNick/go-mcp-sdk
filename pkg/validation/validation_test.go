@@ -133,7 +133,7 @@ func TestValidateParameters(t *testing.T) {
 	tests := []struct {
 		name    string
 		params  map[string]any
-		schemas map[string]any
+		schema  map[string]any
 		wantErr bool
 	}{
 		{
@@ -145,14 +145,32 @@ func TestValidateParameters(t *testing.T) {
 				"tags":    []string{"a", "b"},
 				"details": map[string]any{"key": "value"},
 			},
-			schemas: map[string]any{
+			schema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"name":    map[string]any{"type": "string", "required": true},
-					"age":     map[string]any{"type": "number"},
-					"active":  map[string]any{"type": "boolean"},
-					"tags":    map[string]any{"type": "array"},
-					"details": map[string]any{"type": "object"},
+					"name": map[string]any{
+						"type": "string",
+					},
+					"age": map[string]any{
+						"type": "number",
+					},
+					"active": map[string]any{
+						"type": "boolean",
+					},
+					"tags": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type": "string",
+						},
+					},
+					"details": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"key": map[string]any{
+								"type": "string",
+							},
+						},
+					},
 				},
 				"required": []any{"name"},
 			},
@@ -163,11 +181,15 @@ func TestValidateParameters(t *testing.T) {
 			params: map[string]any{
 				"age": 30,
 			},
-			schemas: map[string]any{
+			schema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"name": map[string]any{"type": "string"},
-					"age":  map[string]any{"type": "number"},
+					"name": map[string]any{
+						"type": "string",
+					},
+					"age": map[string]any{
+						"type": "number",
+					},
 				},
 				"required": []any{"name"},
 			},
@@ -178,10 +200,12 @@ func TestValidateParameters(t *testing.T) {
 			params: map[string]any{
 				"unknown": "value",
 			},
-			schemas: map[string]any{
+			schema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"name": map[string]any{"type": "string"},
+					"name": map[string]any{
+						"type": "string",
+					},
 				},
 			},
 			wantErr: true,
@@ -191,10 +215,12 @@ func TestValidateParameters(t *testing.T) {
 			params: map[string]any{
 				"name": 123,
 			},
-			schemas: map[string]any{
+			schema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"name": map[string]any{"type": "string"},
+					"name": map[string]any{
+						"type": "string",
+					},
 				},
 			},
 			wantErr: true,
@@ -203,7 +229,140 @@ func TestValidateParameters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateParameters(tt.params, tt.schemas)
+			err := ValidateParameters(tt.params, tt.schema)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateParameters() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateComplexSchema(t *testing.T) {
+	tests := []struct {
+		name    string
+		params  map[string]any
+		schema  map[string]any
+		wantErr bool
+	}{
+		{
+			name: "nested object validation",
+			params: map[string]any{
+				"user": map[string]any{
+					"name": "John",
+					"address": map[string]any{
+						"street": "123 Main St",
+						"city":   "San Francisco",
+						"zip":    "94105",
+					},
+				},
+			},
+			schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"user": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"name": map[string]any{
+								"type": "string",
+							},
+							"address": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"street": map[string]any{"type": "string"},
+									"city":   map[string]any{"type": "string"},
+									"zip":    map[string]any{"type": "string"},
+								},
+								"required": []any{"street", "city", "zip"},
+							},
+						},
+						"required": []any{"name", "address"},
+					},
+				},
+				"required": []any{"user"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid nested object",
+			params: map[string]any{
+				"user": map[string]any{
+					"name": "John",
+					"address": map[string]any{
+						"street": "123 Main St",
+						"city":   123, // Should be string
+						"zip":    "94105",
+					},
+				},
+			},
+			schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"user": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"name": map[string]any{
+								"type": "string",
+							},
+							"address": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"street": map[string]any{"type": "string"},
+									"city":   map[string]any{"type": "string"},
+									"zip":    map[string]any{"type": "string"},
+								},
+								"required": []any{"street", "city", "zip"},
+							},
+						},
+						"required": []any{"name", "address"},
+					},
+				},
+				"required": []any{"user"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "missing required nested field",
+			params: map[string]any{
+				"user": map[string]any{
+					"name": "John",
+					"address": map[string]any{
+						"street": "123 Main St",
+						// Missing required city field
+						"zip": "94105",
+					},
+				},
+			},
+			schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"user": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"name": map[string]any{
+								"type": "string",
+							},
+							"address": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"street": map[string]any{"type": "string"},
+									"city":   map[string]any{"type": "string"},
+									"zip":    map[string]any{"type": "string"},
+								},
+								"required": []any{"street", "city", "zip"},
+							},
+						},
+						"required": []any{"name", "address"},
+					},
+				},
+				"required": []any{"user"},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateParameters(tt.params, tt.schema)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateParameters() error = %v, wantErr %v", err, tt.wantErr)
 			}

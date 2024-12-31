@@ -95,29 +95,95 @@ func ValidateParameters(params map[string]any, schema map[string]any) error {
 		return fmt.Errorf("invalid schema: properties must be an object")
 	}
 
+	// Check required fields
 	required, _ := schema["required"].([]interface{})
 	requiredSet := make(map[string]bool)
 	for _, r := range required {
 		if name, ok := r.(string); ok {
 			requiredSet[name] = true
+			if _, exists := params[name]; !exists {
+				return fmt.Errorf("missing required field: %s", name)
+			}
 		}
 	}
 
-	// Check for required parameters
-	for name := range requiredSet {
-		if _, exists := params[name]; !exists {
-			return fmt.Errorf("missing required parameter: %s", name)
-		}
-	}
-
-	// Validate provided parameters
+	// Validate each parameter against its schema
 	for name, value := range params {
 		propSchema, ok := properties[name].(map[string]interface{})
 		if !ok {
 			return fmt.Errorf("unknown parameter: %s", name)
 		}
 
-		if err := ValidateParameter(name, value, propSchema); err != nil {
+		if err := validateNestedParameter(name, value, propSchema); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateNestedParameter validates a parameter and its nested fields against a schema
+func validateNestedParameter(path string, value any, schema map[string]interface{}) error {
+	paramType, ok := schema["type"].(string)
+	if !ok {
+		return fmt.Errorf("invalid schema: type not specified for parameter: %s", path)
+	}
+
+	switch paramType {
+	case "object":
+		objValue, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("parameter %s: expected object, got %T", path, value)
+		}
+
+		properties, ok := schema["properties"].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("invalid schema: properties must be an object for parameter: %s", path)
+		}
+
+		// Check required fields
+		required, _ := schema["required"].([]interface{})
+		for _, r := range required {
+			if name, ok := r.(string); ok {
+				if _, exists := objValue[name]; !exists {
+					return fmt.Errorf("missing required field: %s.%s", path, name)
+				}
+			}
+		}
+
+		// Validate nested fields
+		for name, nestedValue := range objValue {
+			propSchema, ok := properties[name].(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("unknown field: %s.%s", path, name)
+			}
+
+			if err := validateNestedParameter(fmt.Sprintf("%s.%s", path, name), nestedValue, propSchema); err != nil {
+				return err
+			}
+		}
+
+	case "array":
+		// Handle both []interface{} and concrete slice types
+		v := reflect.ValueOf(value)
+		if v.Kind() != reflect.Slice && v.Kind() != reflect.Array {
+			return fmt.Errorf("parameter %s: expected array, got %T", path, value)
+		}
+
+		// Validate array items if items schema is provided
+		if items, ok := schema["items"].(map[string]interface{}); ok {
+			for i := 0; i < v.Len(); i++ {
+				itemPath := fmt.Sprintf("%s[%d]", path, i)
+				item := v.Index(i).Interface()
+				if err := validateNestedParameter(itemPath, item, items); err != nil {
+					return err
+				}
+			}
+		}
+
+	default:
+		// For primitive types, use the existing ValidateParameter function
+		if err := ValidateParameter(path, value, schema); err != nil {
 			return err
 		}
 	}
