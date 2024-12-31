@@ -12,8 +12,8 @@ type ClientCapabilities struct {
 
 // ToolCapabilities represents tool-related capabilities
 type ToolCapabilities struct {
-	SupportsProgress     bool `json:"supportsProgress"`
-	SupportsCancellation bool `json:"supportsCancellation"`
+	SupportsProgress     bool `json:"supports_progress"`
+	SupportsCancellation bool `json:"supports_cancellation"`
 }
 
 // RootsCapability represents the roots capability
@@ -45,7 +45,7 @@ type Tool struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	Parameters  map[string]interface{} `json:"parameters"`
-	InputSchema json.RawMessage        `json:"input_schema,omitempty"`
+	InputSchema json.RawMessage        `json:"input_schema"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -180,7 +180,7 @@ func (e *ParseError) Error() string {
 
 // Progress represents a progress notification from a tool
 type Progress struct {
-	ToolID  string `json:"tool_id,toolId"`
+	ToolID  string `json:"tool_id"`
 	Current int    `json:"current"`
 	Total   int    `json:"total"`
 	Message string `json:"message"`
@@ -208,9 +208,9 @@ type ServerInfo struct {
 
 // InitializeResult represents the result of initialization
 type InitializeResult struct {
-	ProtocolVersion string             `json:"protocol_version,protocolVersion"`
+	ProtocolVersion string             `json:"protocol_version"`
 	Capabilities    ServerCapabilities `json:"capabilities"`
-	ServerInfo      Implementation     `json:"server_info,serverInfo"`
+	ServerInfo      Implementation     `json:"server_info"`
 }
 
 // InitializationOptions represents server initialization options
@@ -265,7 +265,7 @@ type ServerCapabilities struct {
 
 // ToolsCapability represents the tool-related capabilities of the server
 type ToolsCapability struct {
-	ListChanged bool `json:"list_changed,listChanged"`
+	ListChanged bool `json:"list_changed"`
 }
 
 // LoggingCapability represents logging capabilities
@@ -313,23 +313,23 @@ func (p *InitializeParams) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Try protocol version
+	// Try protocol_version (snake_case first)
 	if pv, ok := raw["protocol_version"]; ok {
 		if err := json.Unmarshal(pv, &p.ProtocolVersion); err != nil {
 			return err
 		}
-	} else if pv, ok := raw["protocolVersion"]; ok {
+	} else if pv, ok := raw["protocolVersion"]; ok { // Then camelCase
 		if err := json.Unmarshal(pv, &p.ProtocolVersion); err != nil {
 			return err
 		}
 	}
 
-	// Try client info
+	// Try client_info (snake_case first)
 	if ci, ok := raw["client_info"]; ok {
 		if err := json.Unmarshal(ci, &p.ClientInfo); err != nil {
 			return err
 		}
-	} else if ci, ok := raw["clientInfo"]; ok {
+	} else if ci, ok := raw["clientInfo"]; ok { // Then camelCase
 		if err := json.Unmarshal(ci, &p.ClientInfo); err != nil {
 			return err
 		}
@@ -352,23 +352,23 @@ func (tc *ToolCapabilities) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Try supports progress
+	// Try supports_progress (snake_case first)
 	if sp, ok := raw["supports_progress"]; ok {
 		if err := json.Unmarshal(sp, &tc.SupportsProgress); err != nil {
 			return err
 		}
-	} else if sp, ok := raw["supportsProgress"]; ok {
+	} else if sp, ok := raw["supportsProgress"]; ok { // Then camelCase
 		if err := json.Unmarshal(sp, &tc.SupportsProgress); err != nil {
 			return err
 		}
 	}
 
-	// Try supports cancellation
+	// Try supports_cancellation (snake_case first)
 	if sc, ok := raw["supports_cancellation"]; ok {
 		if err := json.Unmarshal(sc, &tc.SupportsCancellation); err != nil {
 			return err
 		}
-	} else if sc, ok := raw["supportsCancellation"]; ok {
+	} else if sc, ok := raw["supportsCancellation"]; ok { // Then camelCase
 		if err := json.Unmarshal(sc, &tc.SupportsCancellation); err != nil {
 			return err
 		}
@@ -405,10 +405,10 @@ func (t *Tool) UnmarshalJSON(data []byte) error {
 		}
 	}
 
-	// Try input schema with both snake_case and camelCase
+	// Try input_schema (snake_case first)
 	if schema, ok := raw["input_schema"]; ok {
 		t.InputSchema = schema
-	} else if schema, ok := raw["inputSchema"]; ok {
+	} else if schema, ok := raw["inputSchema"]; ok { // Then camelCase
 		t.InputSchema = schema
 	}
 

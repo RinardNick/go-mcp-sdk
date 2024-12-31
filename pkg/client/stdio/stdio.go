@@ -206,11 +206,14 @@ func (c *StdioClient) Initialize(ctx context.Context) error {
 	return nil
 }
 
-// ListTools returns a list of available tools
+// ListTools lists all available tools
 func (c *StdioClient) ListTools(ctx context.Context) ([]types.Tool, error) {
 	resp, err := c.SendRequest(ctx, "tools/list", nil)
 	if err != nil {
-		return nil, err
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to list tools: %w", err)
 	}
 
 	var result struct {
@@ -343,6 +346,11 @@ func (c *StdioClient) SendNotification(ctx context.Context, method string, param
 	}
 
 	return nil
+}
+
+// SendProgress sends a progress notification
+func (c *StdioClient) SendProgress(ctx context.Context, progress types.Progress) error {
+	return c.SendNotification(ctx, "notifications/progress", progress)
 }
 
 // Response represents a JSON-RPC response
