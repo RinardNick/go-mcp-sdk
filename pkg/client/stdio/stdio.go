@@ -208,7 +208,7 @@ func (c *StdioClient) Initialize(ctx context.Context) error {
 
 // ListTools lists all available tools
 func (c *StdioClient) ListTools(ctx context.Context) ([]types.Tool, error) {
-	resp, err := c.SendRequest(ctx, "tools/list", nil)
+	resp, err := c.SendRequest(ctx, "mcp/list_tools", nil)
 	if err != nil {
 		if err == context.Canceled || err == context.DeadlineExceeded {
 			return nil, err
@@ -234,7 +234,7 @@ func (c *StdioClient) ExecuteTool(ctx context.Context, call types.ToolCall) (*ty
 		"arguments": call.Parameters,
 	}
 
-	resp, err := c.SendRequest(ctx, "tools/call", params)
+	resp, err := c.SendRequest(ctx, "mcp/call_tool", params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send tool call request: %w", err)
 	}

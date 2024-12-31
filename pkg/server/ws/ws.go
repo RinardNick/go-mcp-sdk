@@ -271,21 +271,21 @@ func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
 		var handleErr error
 
 		switch req.Method {
-		case "tools/list":
+		case "mcp/list_tools":
 			result = struct {
 				Tools []types.Tool `json:"tools"`
 			}{
 				Tools: t.server.GetTools(),
 			}
 
-		case "resources/list":
+		case "mcp/list_resources":
 			result = struct {
 				Resources []types.Resource `json:"resources"`
 			}{
 				Resources: t.server.GetResources(),
 			}
 
-		case "tools/call":
+		case "mcp/call_tool":
 			var params struct {
 				Name       string                 `json:"name"`
 				Parameters map[string]interface{} `json:"parameters"`

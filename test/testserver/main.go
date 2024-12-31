@@ -58,7 +58,7 @@ func handleRequest(req request) *types.Response {
 		resp.Result = resultBytes
 		return resp
 
-	case "tools/list":
+	case "mcp/list_tools":
 		log.Printf("Handling list_tools request")
 		inputSchema := map[string]interface{}{
 			"type": "object",
@@ -118,7 +118,7 @@ func handleRequest(req request) *types.Response {
 		resp.Result = resultBytes
 		return resp
 
-	case "resources/list":
+	case "mcp/list_resources":
 		log.Printf("Handling list_resources request")
 		result := map[string]interface{}{
 			"resources": []types.Resource{
@@ -140,7 +140,7 @@ func handleRequest(req request) *types.Response {
 		resp.Result = json.RawMessage(resultBytes)
 		log.Printf("List resources response: %+v", resp)
 
-	case "tools/call":
+	case "mcp/call_tool":
 		log.Printf("Handling tools/call request")
 		var params struct {
 			Name      string                 `json:"name"`
