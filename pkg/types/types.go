@@ -12,8 +12,8 @@ type ClientCapabilities struct {
 
 // ToolCapabilities represents tool-related capabilities
 type ToolCapabilities struct {
-	SupportsProgress     bool `json:"supports_progress"`
-	SupportsCancellation bool `json:"supports_cancellation"`
+	SupportsProgress     bool `json:"supportsProgress"`
+	SupportsCancellation bool `json:"supportsCancellation"`
 }
 
 // RootsCapability represents the roots capability
