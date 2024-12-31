@@ -37,6 +37,42 @@ type Logger interface {
 	Printf(format string, v ...interface{})
 }
 
+// ConnectionState represents the state of a WebSocket connection
+type ConnectionState int
+
+const (
+	// StateDisconnected indicates the connection is not established
+	StateDisconnected ConnectionState = iota
+	// StateConnecting indicates the connection is being established
+	StateConnecting
+	// StateConnected indicates the connection is established and ready
+	StateConnected
+	// StateClosing indicates the connection is being closed gracefully
+	StateClosing
+)
+
+// String returns the string representation of the connection state
+func (s ConnectionState) String() string {
+	switch s {
+	case StateDisconnected:
+		return "disconnected"
+	case StateConnecting:
+		return "connecting"
+	case StateConnected:
+		return "connected"
+	case StateClosing:
+		return "closing"
+	default:
+		return "unknown"
+	}
+}
+
+// clientInfo holds information about a connected client
+type clientInfo struct {
+	conn  *websocket.Conn
+	state ConnectionState
+}
+
 // Transport implements a server transport using WebSocket
 type Transport struct {
 	server     server.Server
@@ -44,7 +80,7 @@ type Transport struct {
 	httpServer *http.Server
 	upgrader   websocket.Upgrader
 	logger     Logger
-	clients    sync.Map // map[*websocket.Conn]bool
+	clients    sync.Map // map[*websocket.Conn]*clientInfo
 	mu         sync.RWMutex
 }
 
@@ -117,9 +153,13 @@ func (t *Transport) Start(ctx context.Context) error {
 // Stop stops the transport
 func (t *Transport) Stop() error {
 	t.logger.Printf("Stopping WebSocket server")
-	t.clients.Range(func(key, _ interface{}) bool {
-		if conn, ok := key.(*websocket.Conn); ok {
-			conn.Close()
+	t.clients.Range(func(key, value interface{}) bool {
+		if info, ok := value.(*clientInfo); ok {
+			info.state = StateClosing
+			if info.conn != nil {
+				info.conn.Close()
+			}
+			info.state = StateDisconnected
 		}
 		return true
 	})
@@ -160,6 +200,12 @@ func (t *Transport) Publish(eventType string, data interface{}) error {
 
 // handleWS handles WebSocket connections
 func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
+	// Set initial state to connecting
+	info := &clientInfo{
+		state: StateConnecting,
+	}
+
+	// Upgrade connection
 	conn, err := t.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		t.logger.Printf("Failed to upgrade connection: %v", err)
@@ -167,9 +213,13 @@ func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	t.logger.Printf("New WebSocket connection from %s", r.RemoteAddr)
-	t.clients.Store(conn, true)
+	// Update connection info
+	info.conn = conn
+	info.state = StateConnected
+	t.clients.Store(conn, info)
 	defer t.clients.Delete(conn)
+
+	t.logger.Printf("New WebSocket connection from %s (state: %s)", r.RemoteAddr, info.state)
 
 	// Set up ping/pong handlers
 	conn.SetReadDeadline(time.Now().Add(t.config.PongWait))
@@ -197,6 +247,7 @@ func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				t.logger.Printf("WebSocket error: %v", err)
 			}
+			info.state = StateDisconnected
 			break
 		}
 
@@ -297,6 +348,7 @@ func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		if err := conn.WriteJSON(resp); err != nil {
 			t.logger.Printf("Failed to write response: %v", err)
+			info.state = StateDisconnected
 			break
 		}
 	}
@@ -317,4 +369,18 @@ func (t *Transport) writeJSONRPCError(conn *websocket.Conn, id *int64, err *type
 // GetHandler returns the HTTP handler for the transport
 func (t *Transport) GetHandler() http.Handler {
 	return t.httpServer.Handler
+}
+
+// GetConnectionStates returns the current state of all connections
+func (t *Transport) GetConnectionStates() map[string]ConnectionState {
+	states := make(map[string]ConnectionState)
+	t.clients.Range(func(key, value interface{}) bool {
+		if info, ok := value.(*clientInfo); ok {
+			if info.conn != nil {
+				states[info.conn.RemoteAddr().String()] = info.state
+			}
+		}
+		return true
+	})
+	return states
 }

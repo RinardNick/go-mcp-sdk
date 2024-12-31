@@ -77,6 +77,128 @@ func TestWebSocketTransportReconnection(t *testing.T) {
 	})
 }
 
+func TestWebSocketTransportConnectionStates(t *testing.T) {
+	s := server.NewServer(nil)
+	config := &serverws.Config{
+		Address:      ":0",
+		WSPath:       "/ws",
+		PingInterval: 100 * time.Millisecond,
+		PongWait:     200 * time.Millisecond,
+	}
+	transport := serverws.NewTransport(s, config)
+	ctx := context.Background()
+	go transport.Start(ctx)
+	defer transport.Stop()
+
+	// Create test server
+	server := httptest.NewServer(transport.GetHandler())
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+
+	// Test connection state transitions
+	t.Run("Connection State Transitions", func(t *testing.T) {
+		// Connect
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("Failed to connect to WebSocket: %v", err)
+		}
+
+		// Wait for connection setup
+		time.Sleep(50 * time.Millisecond)
+
+		// Check connection state
+		states := transport.GetConnectionStates()
+		if len(states) != 1 {
+			t.Errorf("Expected 1 connection, got %d", len(states))
+		}
+		for _, state := range states {
+			if state != serverws.StateConnected {
+				t.Errorf("Expected state %s, got %s", serverws.StateConnected, state)
+			}
+		}
+
+		// Close connection
+		conn.Close()
+
+		// Wait for disconnection
+		time.Sleep(50 * time.Millisecond)
+
+		// Check disconnected state
+		states = transport.GetConnectionStates()
+		if len(states) != 0 {
+			t.Errorf("Expected 0 connections after close, got %d", len(states))
+		}
+	})
+
+	// Test multiple connections
+	t.Run("Multiple Connections", func(t *testing.T) {
+		// Create multiple connections
+		var conns []*websocket.Conn
+		for i := 0; i < 3; i++ {
+			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			if err != nil {
+				t.Fatalf("Failed to connect to WebSocket: %v", err)
+			}
+			conns = append(conns, conn)
+			time.Sleep(10 * time.Millisecond) // Small delay between connections
+		}
+
+		// Wait for connections to stabilize
+		time.Sleep(50 * time.Millisecond)
+
+		// Check all connections are in connected state
+		states := transport.GetConnectionStates()
+		if len(states) != 3 {
+			t.Errorf("Expected 3 connections, got %d", len(states))
+		}
+		for _, state := range states {
+			if state != serverws.StateConnected {
+				t.Errorf("Expected state %s, got %s", serverws.StateConnected, state)
+			}
+		}
+
+		// Close connections one by one
+		for i, conn := range conns {
+			conn.Close()
+			time.Sleep(50 * time.Millisecond)
+
+			states = transport.GetConnectionStates()
+			expectedConns := len(conns) - (i + 1)
+			if len(states) != expectedConns {
+				t.Errorf("Expected %d connections, got %d", expectedConns, len(states))
+			}
+		}
+	})
+
+	// Test graceful shutdown
+	t.Run("Graceful Shutdown", func(t *testing.T) {
+		// Create a connection
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("Failed to connect to WebSocket: %v", err)
+		}
+		defer conn.Close()
+
+		// Wait for connection setup
+		time.Sleep(50 * time.Millisecond)
+
+		// Stop the transport
+		if err := transport.Stop(); err != nil {
+			t.Fatalf("Failed to stop transport: %v", err)
+		}
+
+		// Wait for disconnection
+		time.Sleep(50 * time.Millisecond)
+
+		// Check all connections are closed
+		states := transport.GetConnectionStates()
+		if len(states) != 0 {
+			t.Errorf("Expected 0 connections after shutdown, got %d", len(states))
+		}
+	})
+}
+
 func TestWebSocketTransportConcurrentClients(t *testing.T) {
 	s := server.NewServer(nil)
 
