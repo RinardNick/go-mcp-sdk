@@ -388,3 +388,35 @@ func (c *StdioClient) ListResources(ctx context.Context) ([]types.Resource, erro
 func (c *StdioClient) SetInitializeParams(params *types.InitializeParams) {
 	c.initializeParams = params
 }
+
+// GetResourceTemplates returns a list of available resource templates
+func (c *StdioClient) GetResourceTemplates(ctx context.Context) ([]types.Resource, error) {
+	resp, err := c.SendRequest(ctx, "resources/templates/list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Templates []types.Resource `json:"templates"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal resource templates: %w", err)
+	}
+
+	return result.Templates, nil
+}
+
+// ApplyResourceTemplate applies a resource template with the given parameters
+func (c *StdioClient) ApplyResourceTemplate(ctx context.Context, template types.ResourceTemplate) (*types.ResourceTemplateResult, error) {
+	resp, err := c.SendRequest(ctx, "resources/templates/apply", template)
+	if err != nil {
+		return nil, err
+	}
+
+	var result types.ResourceTemplateResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal template result: %w", err)
+	}
+
+	return &result, nil
+}

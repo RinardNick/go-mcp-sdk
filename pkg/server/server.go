@@ -69,6 +69,10 @@ type Server interface {
 	RegisterResource(resource types.Resource) error
 	// HandleInitialize handles an initialization request
 	HandleInitialize(ctx context.Context, params types.InitializeParams) (*types.InitializeResult, error)
+	// GetResourceTemplates returns all registered resource templates
+	GetResourceTemplates() []types.Resource
+	// ApplyResourceTemplate applies a resource template with the given parameters
+	ApplyResourceTemplate(ctx context.Context, template types.ResourceTemplate) (*types.ResourceTemplateResult, error)
 }
 
 // BaseServer provides a basic implementation of the Server interface
@@ -550,4 +554,71 @@ func (s *BaseServer) Stop(ctx context.Context) error {
 	})
 
 	return shutdownErr
+}
+
+// GetResourceTemplates returns all registered resource templates
+func (s *BaseServer) GetResourceTemplates() []types.Resource {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	templates := make([]types.Resource, 0)
+	for _, resource := range s.resources {
+		if resource.IsTemplate {
+			templates = append(templates, resource)
+		}
+	}
+	return templates
+}
+
+// ApplyResourceTemplate applies a resource template with the given parameters
+func (s *BaseServer) ApplyResourceTemplate(ctx context.Context, template types.ResourceTemplate) (*types.ResourceTemplateResult, error) {
+	s.mu.RLock()
+	resource, exists := s.resources[template.ResourceID]
+	s.mu.RUnlock()
+
+	if !exists {
+		return nil, types.InvalidParamsError(fmt.Sprintf("resource template not found: %s", template.ResourceID))
+	}
+
+	if !resource.IsTemplate {
+		return nil, types.InvalidParamsError(fmt.Sprintf("resource is not a template: %s", template.ResourceID))
+	}
+
+	// Validate parameters against schema
+	if resource.Schema != nil && s.config.EnableValidation {
+		var schema map[string]interface{}
+		if err := json.Unmarshal(resource.Schema, &schema); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal template schema: %w", err)
+		}
+
+		if err := validation.ValidateParameters(template.Parameters, schema); err != nil {
+			return nil, types.InvalidParamsError(fmt.Sprintf("invalid template parameters: %v", err))
+		}
+	}
+
+	// Create a copy of the resource for modification
+	result := resource
+	result.IsTemplate = false // The result is not a template
+	result.Schema = nil       // Remove schema from result
+	result.Parameters = nil   // Remove parameters from result
+
+	// Apply template parameters to URI
+	uri := result.URI
+	for key, value := range template.Parameters {
+		placeholder := fmt.Sprintf("{%s}", key)
+		uri = strings.ReplaceAll(uri, placeholder, fmt.Sprint(value))
+	}
+	result.URI = uri
+
+	// Generate a new unique ID for the resulting resource
+	result.ID = fmt.Sprintf("%s-%s", template.ResourceID, generateResourceID())
+
+	return &types.ResourceTemplateResult{
+		Resource: result,
+	}, nil
+}
+
+// generateResourceID generates a unique resource ID
+func generateResourceID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
 }

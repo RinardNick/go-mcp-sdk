@@ -23,6 +23,12 @@ type Client interface {
 	// ListResources returns a list of available resources
 	ListResources(ctx context.Context) ([]types.Resource, error)
 
+	// GetResourceTemplates returns a list of available resource templates
+	GetResourceTemplates(ctx context.Context) ([]types.Resource, error)
+
+	// ApplyResourceTemplate applies a resource template with the given parameters
+	ApplyResourceTemplate(ctx context.Context, template types.ResourceTemplate) (*types.ResourceTemplateResult, error)
+
 	// Close shuts down the client and cleans up resources
 	Close() error
 }

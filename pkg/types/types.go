@@ -108,6 +108,21 @@ type Resource struct {
 	Type        string                 `json:"type"`
 	URI         string                 `json:"uri"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	IsTemplate  bool                   `json:"is_template,omitempty"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+	Schema      json.RawMessage        `json:"schema,omitempty"`
+}
+
+// ResourceTemplate represents a resource template with parameter values
+type ResourceTemplate struct {
+	ResourceID string                 `json:"resource_id"`
+	Parameters map[string]interface{} `json:"parameters"`
+}
+
+// ResourceTemplateResult represents the result of applying a resource template
+type ResourceTemplateResult struct {
+	Resource Resource  `json:"resource"`
+	Error    *MCPError `json:"error,omitempty"`
 }
 
 // MCPError represents an error in the MCP protocol

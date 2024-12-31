@@ -65,7 +65,7 @@ This document tracks the implementation status of various features in the Go MCP
 ❌ Test resource access permissions
 ❌ Test resource update notifications
 ❌ Test resource expiration
-❌ Test resource templates
+✅ Test resource templates
 
 ## Batch Operations:
 ❌ Test large batch requests
@@ -93,13 +93,13 @@ This document tracks the implementation status of various features in the Go MCP
 ✅ Basic initialization
 ✅ Progress reporting
 ❌ Cancellation support
-❌ Resource template support
+✅ Resource template support
 ❌ Streaming support
 
 ## Server Features:
 ✅ Basic request handling
 ✅ Basic tool registration
-❌ Resource template handling
+✅ Resource template handling
 ✅ Progress reporting
 ❌ Cancellation handling
 ❌ Streaming response support 
