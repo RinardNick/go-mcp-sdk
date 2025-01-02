@@ -86,7 +86,7 @@ func TestProgressReporting(t *testing.T) {
 			progressMutex.Lock()
 			progressUpdates = append(progressUpdates, p)
 			progressMutex.Unlock()
-			if p.Current == p.Total {
+			if p.Current == p.Total && p.Current == 5 {
 				wg.Done()
 			}
 		})
@@ -102,8 +102,19 @@ func TestProgressReporting(t *testing.T) {
 			t.Fatalf("Failed to execute tool: %v", err)
 		}
 
-		// Wait for all progress updates
-		wg.Wait()
+		// Wait for all progress updates with a timeout
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// Progress updates completed
+		case <-time.After(5 * time.Second):
+			t.Fatal("Timeout waiting for progress updates")
+		}
 
 		// Verify progress updates
 		progressMutex.Lock()

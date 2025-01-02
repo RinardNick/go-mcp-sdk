@@ -271,24 +271,17 @@ func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
 		var handleErr error
 
 		switch req.Method {
-		case "mcp/list_tools":
+		case "tools/list":
 			result = struct {
 				Tools []types.Tool `json:"tools"`
 			}{
 				Tools: t.server.GetTools(),
 			}
 
-		case "mcp/list_resources":
-			result = struct {
-				Resources []types.Resource `json:"resources"`
-			}{
-				Resources: t.server.GetResources(),
-			}
-
-		case "mcp/call_tool":
+		case "tools/call":
 			var params struct {
-				Name       string                 `json:"name"`
-				Parameters map[string]interface{} `json:"parameters"`
+				Name      string                 `json:"name"`
+				Arguments map[string]interface{} `json:"arguments"`
 			}
 			if unmarshalErr := json.Unmarshal(req.Params, &params); unmarshalErr != nil {
 				t.writeJSONRPCError(conn, &req.ID, types.InvalidParamsError("invalid tool call parameters"))
@@ -297,7 +290,7 @@ func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
 
 			toolCall := types.ToolCall{
 				Name:       params.Name,
-				Parameters: params.Parameters,
+				Parameters: params.Arguments,
 			}
 
 			// Create a new context for this request
@@ -314,18 +307,11 @@ func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// Use the result directly
+		case "mcp/list_resources":
 			result = struct {
-				Content []map[string]interface{} `json:"content"`
-				IsError bool                     `json:"isError"`
+				Resources []types.Resource `json:"resources"`
 			}{
-				Content: []map[string]interface{}{
-					{
-						"type": "text",
-						"text": toolCall.Parameters["param1"].(string),
-					},
-				},
-				IsError: false,
+				Resources: t.server.GetResources(),
 			}
 
 		default:

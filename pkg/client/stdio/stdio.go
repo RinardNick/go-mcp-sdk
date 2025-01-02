@@ -48,13 +48,13 @@ func (c *StdioClient) OnProgress(handler types.ProgressHandler) {
 // handleNotification processes notifications from the server
 func (c *StdioClient) handleNotification(notification types.Notification) error {
 	switch notification.Method {
-	case "progress":
+	case "tools/progress":
 		if c.progressHandler != nil {
-			var progressNotif types.ProgressNotification
-			if err := json.Unmarshal(notification.Params, &progressNotif); err != nil {
+			var progress types.Progress
+			if err := json.Unmarshal(notification.Params, &progress); err != nil {
 				return fmt.Errorf("failed to unmarshal progress notification: %w", err)
 			}
-			c.progressHandler(progressNotif.Progress)
+			c.progressHandler(progress)
 		}
 	default:
 		// Forward notification to channel for other handlers
@@ -208,7 +208,7 @@ func (c *StdioClient) Initialize(ctx context.Context) error {
 
 // ListTools lists all available tools
 func (c *StdioClient) ListTools(ctx context.Context) ([]types.Tool, error) {
-	resp, err := c.SendRequest(ctx, "mcp/list_tools", nil)
+	resp, err := c.SendRequest(ctx, "tools/list", nil)
 	if err != nil {
 		if err == context.Canceled || err == context.DeadlineExceeded {
 			return nil, err
@@ -234,8 +234,11 @@ func (c *StdioClient) ExecuteTool(ctx context.Context, call types.ToolCall) (*ty
 		"arguments": call.Parameters,
 	}
 
-	resp, err := c.SendRequest(ctx, "mcp/call_tool", params)
+	resp, err := c.SendRequest(ctx, "tools/call", params)
 	if err != nil {
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			return nil, err
+		}
 		return nil, fmt.Errorf("failed to send tool call request: %w", err)
 	}
 

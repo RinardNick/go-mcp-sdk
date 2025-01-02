@@ -3,6 +3,7 @@ package sse
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +14,15 @@ import (
 )
 
 func TestSSEClient(t *testing.T) {
+	// Helper function to marshal JSON
+	mustMarshal := func(v interface{}) []byte {
+		data, err := json.Marshal(v)
+		if err != nil {
+			panic(err)
+		}
+		return data
+	}
+
 	// Create a test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -27,8 +37,11 @@ func TestSSEClient(t *testing.T) {
 				return
 			}
 
+			// Set content type for JSON response
+			w.Header().Set("Content-Type", "application/json")
+
 			switch req.Method {
-			case "mcp/list_tools":
+			case "tools/list":
 				// Create tool input schema
 				inputSchema := map[string]interface{}{
 					"type": "object",
@@ -46,52 +59,79 @@ func TestSSEClient(t *testing.T) {
 					return
 				}
 
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"jsonrpc": "2.0",
-					"id":      1,
-					"result": map[string]interface{}{
-						"tools": []types.Tool{
-							{
-								Name:        "test_tool",
-								Description: "A test tool",
-								InputSchema: schemaBytes,
-							},
-						},
+				tools := []types.Tool{
+					{
+						Name:        "test_tool",
+						Description: "A test tool",
+						InputSchema: schemaBytes,
 					},
-				})
+				}
 
-			case "mcp/list_resources":
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"jsonrpc": "2.0",
-					"id":      1,
-					"result": map[string]interface{}{
-						"resources": []types.Resource{
-							{
-								ID:          "test_resource",
-								Name:        "test_resource",
-								Description: "A test resource",
-								Type:        "test",
-								URI:         "test://resource",
-								Metadata:    map[string]interface{}{},
-							},
-						},
-					},
-				})
-
-			case "mcp/call_tool":
-				result, err := types.NewToolResult(map[string]interface{}{
-					"output": "test output",
-				})
-				if err != nil {
+				result := map[string]interface{}{
+					"tools": tools,
+				}
+				response := types.Response{
+					Jsonrpc: "2.0",
+					Result:  json.RawMessage(mustMarshal(result)),
+					ID:      1,
+				}
+				if err := json.NewEncoder(w).Encode(response); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
 
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"jsonrpc": "2.0",
-					"id":      1,
-					"result":  result,
-				})
+			case "tools/call":
+				var params struct {
+					Name      string                 `json:"name"`
+					Arguments map[string]interface{} `json:"arguments"`
+				}
+				if err := json.Unmarshal(req.Params, &params); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+
+				result := map[string]interface{}{
+					"content": []map[string]interface{}{
+						{
+							"type": "text",
+							"text": "test output",
+						},
+					},
+					"isError": false,
+				}
+				response := types.Response{
+					Jsonrpc: "2.0",
+					Result:  json.RawMessage(mustMarshal(result)),
+					ID:      1,
+				}
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+
+			case "mcp/list_resources":
+				resources := []types.Resource{
+					{
+						ID:          "test_resource",
+						Name:        "test_resource",
+						Description: "A test resource",
+						Type:        "test",
+						URI:         "test://resource",
+						Metadata:    map[string]interface{}{},
+					},
+				}
+				result := map[string]interface{}{
+					"resources": resources,
+				}
+				response := types.Response{
+					Jsonrpc: "2.0",
+					Result:  json.RawMessage(mustMarshal(result)),
+					ID:      1,
+				}
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 			}
 
 		case "/events":
@@ -101,8 +141,10 @@ func TestSSEClient(t *testing.T) {
 			w.Header().Set("Connection", "keep-alive")
 
 			// Send test event
-			w.Write([]byte("event: message\ndata: {\"type\":\"test\"}\n\n"))
-			w.(http.Flusher).Flush()
+			fmt.Fprintf(w, "event: message\ndata: {\"type\":\"test\"}\n\n")
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 
 			// Keep connection open
 			<-r.Context().Done()
@@ -177,13 +219,22 @@ func TestSSEClient(t *testing.T) {
 			t.Fatalf("Failed to unmarshal result: %v", err)
 		}
 
-		output, ok := resultMap["output"].(string)
-		if !ok {
-			t.Fatal("Expected string output in result")
+		content, ok := resultMap["content"].([]interface{})
+		if !ok || len(content) == 0 {
+			t.Fatal("Expected non-empty content array")
 		}
 
-		if output != "test output" {
-			t.Errorf("Expected output 'test output', got '%s'", output)
+		textContent, ok := content[0].(map[string]interface{})
+		if !ok {
+			t.Fatal("Expected content to be a map")
+		}
+
+		if text, ok := textContent["text"].(string); !ok || text != "test output" {
+			t.Errorf("Expected text 'test output', got '%v'", textContent["text"])
+		}
+
+		if isError, ok := resultMap["isError"].(bool); !ok || isError {
+			t.Error("Expected isError to be false")
 		}
 	})
 }

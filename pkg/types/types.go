@@ -195,7 +195,7 @@ func (e *ParseError) Error() string {
 
 // Progress represents a progress notification from a tool
 type Progress struct {
-	ToolID  string `json:"tool_id"`
+	ToolID  string `json:"toolID,tool_id"`
 	Current int    `json:"current"`
 	Total   int    `json:"total"`
 	Message string `json:"message"`

@@ -188,7 +188,7 @@ func TestErrorHandling(t *testing.T) {
 
 		// Test with split JSON messages
 		splitJSON := []string{
-			`{"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "test_tool", `,
+			`{"jsonrpc": "2.0", "method": "mcp/call_tool", "params": {"name": "test_tool", `,
 			`"parameters": {"param1": "test"}}, "id": 1}`,
 		}
 		for _, part := range splitJSON {

@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"syscall"
-	"time"
 
 	"github.com/RinardNick/go-mcp-sdk/pkg/types"
 )
@@ -25,6 +24,17 @@ type batchRequest struct {
 
 type batchResponse struct {
 	Responses []types.Response `json:"responses"`
+}
+
+func writeNotification(w io.Writer, notification interface{}) error {
+	log.Printf("Writing notification: %+v", notification)
+	encoder := json.NewEncoder(w)
+	if err := encoder.Encode(notification); err != nil {
+		log.Printf("Error encoding notification: %v", err)
+		return fmt.Errorf("failed to encode notification: %w", err)
+	}
+	log.Println("Notification written successfully")
+	return nil
 }
 
 func handleRequest(req request) *types.Response {
@@ -58,7 +68,7 @@ func handleRequest(req request) *types.Response {
 		resp.Result = resultBytes
 		return resp
 
-	case "mcp/list_tools":
+	case "tools/list":
 		log.Printf("Handling list_tools request")
 		inputSchema := map[string]interface{}{
 			"type": "object",
@@ -118,6 +128,106 @@ func handleRequest(req request) *types.Response {
 		resp.Result = resultBytes
 		return resp
 
+	case "tools/call":
+		log.Printf("Handling tool call request")
+		var params struct {
+			Name      string                 `json:"name"`
+			Arguments map[string]interface{} `json:"arguments"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			resp.Error = types.InvalidParamsError("invalid tool call parameters")
+			return resp
+		}
+
+		// Handle the tool call
+		switch params.Name {
+		case "test_tool":
+			// Validate parameters
+			if params.Arguments == nil {
+				resp.Error = types.InvalidParamsError("missing parameters")
+				return resp
+			}
+			_, ok := params.Arguments["param1"].(string)
+			if !ok {
+				resp.Error = types.InvalidParamsError("param1 must be a string")
+				return resp
+			}
+
+			// Create the result
+			result := map[string]interface{}{
+				"content": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": "test output",
+					},
+				},
+				"isError": false,
+			}
+			resultBytes, err := json.Marshal(result)
+			if err != nil {
+				resp.Error = types.InternalError(err)
+				return resp
+			}
+			resp.Result = resultBytes
+			return resp
+
+		case "long_operation":
+			// Validate parameters
+			if params.Arguments == nil {
+				resp.Error = types.InvalidParamsError("missing parameters")
+				return resp
+			}
+			steps, ok := params.Arguments["steps"].(float64)
+			if !ok {
+				resp.Error = types.InvalidParamsError("steps must be a number")
+				return resp
+			}
+			if steps < 1 || steps > 10 {
+				resp.Error = types.InvalidParamsError("steps must be between 1 and 10")
+				return resp
+			}
+
+			// Send progress notifications
+			for i := 1; i <= int(steps); i++ {
+				progress := map[string]interface{}{
+					"jsonrpc": "2.0",
+					"method":  "tools/progress",
+					"params": map[string]interface{}{
+						"toolID":  "long_operation",
+						"current": i,
+						"total":   int(steps),
+						"message": fmt.Sprintf("Step %d of %d", i, int(steps)),
+					},
+				}
+				if err := writeNotification(os.Stdout, progress); err != nil {
+					resp.Error = types.InternalError(err)
+					return resp
+				}
+			}
+
+			// Create the result
+			result := map[string]interface{}{
+				"content": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": "Operation completed",
+					},
+				},
+				"isError": false,
+			}
+			resultBytes, err := json.Marshal(result)
+			if err != nil {
+				resp.Error = types.InternalError(err)
+				return resp
+			}
+			resp.Result = resultBytes
+			return resp
+
+		default:
+			resp.Error = types.InvalidParamsError(fmt.Sprintf("unknown tool: %s", params.Name))
+			return resp
+		}
+
 	case "mcp/list_resources":
 		log.Printf("Handling list_resources request")
 		result := map[string]interface{}{
@@ -140,109 +250,13 @@ func handleRequest(req request) *types.Response {
 		resp.Result = json.RawMessage(resultBytes)
 		log.Printf("List resources response: %+v", resp)
 
-	case "mcp/call_tool":
-		log.Printf("Handling tools/call request")
-		var params struct {
-			Name      string                 `json:"name"`
-			Arguments map[string]interface{} `json:"arguments"`
-		}
-		if err := json.Unmarshal(req.Params, &params); err != nil {
-			resp.Error = types.InvalidParamsError(err.Error())
-			break
-		}
-
-		if params.Name == "long_operation" {
-			// Get number of steps
-			stepsRaw, ok := params.Arguments["steps"]
-			if !ok {
-				resp.Error = types.InvalidParamsError("missing steps parameter")
-				break
-			}
-			steps, ok := stepsRaw.(float64)
-			if !ok {
-				resp.Error = types.InvalidParamsError("steps must be a number")
-				break
-			}
-			if steps < 1 || steps > 10 {
-				resp.Error = types.InvalidParamsError("steps must be between 1 and 10")
-				break
-			}
-
-			// Send progress notifications
-			for i := 1; i <= int(steps); i++ {
-				progress := types.Progress{
-					ToolID:  "long_operation",
-					Current: i,
-					Total:   int(steps),
-					Message: fmt.Sprintf("Processing step %d of %d", i, int(steps)),
-				}
-				progressBytes, err := json.Marshal(progress)
-				if err != nil {
-					log.Printf("Error marshaling progress: %v", err)
-					continue
-				}
-				notification := types.Notification{
-					Method: "progress",
-					Params: json.RawMessage(fmt.Sprintf(`{"progress":%s}`, string(progressBytes))),
-				}
-				if err := writeResponse(os.Stdout, notification); err != nil {
-					log.Printf("Error writing progress notification: %v", err)
-				}
-				time.Sleep(100 * time.Millisecond) // Simulate work
-			}
-
-			// Return success result
-			result := map[string]interface{}{
-				"content": []map[string]interface{}{
-					{
-						"type": "text",
-						"text": "Operation completed",
-					},
-				},
-				"isError": false,
-			}
-			resultBytes, err := json.Marshal(result)
-			if err != nil {
-				resp.Error = types.InternalError(err)
-				break
-			}
-			resp.Result = resultBytes
-			return resp
-		}
-
-		if params.Name == "test_tool" {
-			// Validate required param1 parameter
-			param1, ok := params.Arguments["param1"].(string)
-			if !ok {
-				resp.Error = types.InvalidParamsError("param1 parameter must be a string")
-				break
-			}
-			if param1 == "" {
-				resp.Error = types.InvalidParamsError("param1 parameter cannot be empty")
-				break
-			}
-
-			result := map[string]interface{}{
-				"content": []map[string]interface{}{
-					{
-						"type": "text",
-						"text": "test output",
-					},
-				},
-				"isError": false,
-			}
-			toolResult, err := types.NewToolResult(result)
-			if err != nil {
-				resp.Error = types.InternalError(err.Error())
-				break
-			}
-			resp.Result = toolResult.Result
-		} else {
-			resp.Error = types.MethodNotFoundError(fmt.Sprintf("Unknown tool: %s", params.Name))
-		}
-
 	case "test_notification":
 		log.Printf("Handling test_notification request")
+		// No response for notifications
+		return nil
+
+	case "notifications/initialized":
+		log.Printf("Handling initialized notification")
 		// No response for notifications
 		return nil
 

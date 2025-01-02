@@ -167,7 +167,7 @@ func (c *SSEClient) ListResources(ctx context.Context) ([]types.Resource, error)
 
 // ListTools implements the Client interface
 func (c *SSEClient) ListTools(ctx context.Context) ([]types.Tool, error) {
-	resp, err := c.sendRequest(ctx, "mcp/list_tools", nil)
+	resp, err := c.sendRequest(ctx, "tools/list", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -184,17 +184,21 @@ func (c *SSEClient) ListTools(ctx context.Context) ([]types.Tool, error) {
 
 // ExecuteTool implements the Client interface
 func (c *SSEClient) ExecuteTool(ctx context.Context, call types.ToolCall) (*types.ToolResult, error) {
-	resp, err := c.sendRequest(ctx, "mcp/call_tool", call)
+	// Create the request parameters
+	params := map[string]interface{}{
+		"name":      call.Name,
+		"arguments": call.Parameters,
+	}
+
+	resp, err := c.sendRequest(ctx, "tools/call", params)
 	if err != nil {
 		return nil, err
 	}
 
-	var result types.ToolResult
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal tool result: %w", err)
-	}
-
-	return &result, nil
+	// Create a new ToolResult with the response result
+	return &types.ToolResult{
+		Result: resp.Result,
+	}, nil
 }
 
 // SendBatchRequest implements the Client interface
@@ -344,4 +348,36 @@ func (c *SSEClient) Initialize(ctx context.Context) error {
 
 	_, err := c.sendRequest(ctx, "initialize", params)
 	return err
+}
+
+// ApplyResourceTemplate implements the Client interface
+func (c *SSEClient) ApplyResourceTemplate(ctx context.Context, template types.ResourceTemplate) (*types.ResourceTemplateResult, error) {
+	resp, err := c.sendRequest(ctx, "mcp/apply_resource_template", template)
+	if err != nil {
+		return nil, err
+	}
+
+	var result types.ResourceTemplateResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal template result: %w", err)
+	}
+
+	return &result, nil
+}
+
+// GetResourceTemplates implements the Client interface
+func (c *SSEClient) GetResourceTemplates(ctx context.Context) ([]types.Resource, error) {
+	resp, err := c.sendRequest(ctx, "mcp/list_resource_templates", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Templates []types.Resource `json:"templates"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal resource templates: %w", err)
+	}
+
+	return result.Templates, nil
 }

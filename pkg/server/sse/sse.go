@@ -174,11 +174,32 @@ func (t *Transport) handleRPC(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	switch req.Method {
-	case "mcp/list_tools":
+	case "tools/list":
 		result = struct {
 			Tools []types.Tool `json:"tools"`
 		}{
 			Tools: t.server.GetTools(),
+		}
+
+	case "tools/call":
+		var params struct {
+			Name      string                 `json:"name"`
+			Arguments map[string]interface{} `json:"arguments"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			writeJSONRPCError(w, &req.ID, types.InvalidParamsError("invalid tool call parameters"))
+			return
+		}
+
+		toolCall := types.ToolCall{
+			Name:       params.Name,
+			Parameters: params.Arguments,
+		}
+
+		result, err = t.server.HandleToolCall(r.Context(), toolCall)
+		if err != nil {
+			writeJSONRPCError(w, &req.ID, types.InternalError(err.Error()))
+			return
 		}
 
 	case "mcp/list_resources":
@@ -186,19 +207,6 @@ func (t *Transport) handleRPC(w http.ResponseWriter, r *http.Request) {
 			Resources []types.Resource `json:"resources"`
 		}{
 			Resources: t.server.GetResources(),
-		}
-
-	case "mcp/call_tool":
-		var toolCall types.ToolCall
-		if err := json.Unmarshal(req.Params, &toolCall); err != nil {
-			writeJSONRPCError(w, &req.ID, types.InvalidParamsError("invalid tool call parameters"))
-			return
-		}
-
-		result, err = t.server.HandleToolCall(r.Context(), toolCall)
-		if err != nil {
-			writeJSONRPCError(w, &req.ID, types.InternalError(err.Error()))
-			return
 		}
 
 	default:
