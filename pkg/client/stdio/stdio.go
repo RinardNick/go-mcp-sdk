@@ -260,6 +260,9 @@ func (c *StdioClient) ListTools(ctx context.Context) ([]types.Tool, error) {
 		// If the cached method fails with something other than method not found,
 		// return the error
 		if mcpErr, ok := err.(*types.MCPError); !ok || mcpErr.Code != types.ErrMethodNotFound {
+			if err == context.Canceled || err == context.DeadlineExceeded {
+				return nil, err
+			}
 			return nil, fmt.Errorf("failed to list tools: %w", err)
 		}
 
@@ -277,6 +280,9 @@ func (c *StdioClient) ListTools(ctx context.Context) ([]types.Tool, error) {
 		if mcpErr, ok := err.(*types.MCPError); ok && mcpErr.Code == types.ErrMethodNotFound {
 			resp, err = c.SendRequest(ctx, "mcp/list_tools", nil)
 			if err != nil {
+				if err == context.Canceled || err == context.DeadlineExceeded {
+					return nil, err
+				}
 				return nil, fmt.Errorf("failed to list tools: %w", err)
 			}
 			// Cache the successful method name

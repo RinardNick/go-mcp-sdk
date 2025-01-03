@@ -22,14 +22,14 @@ This document tracks the implementation status of various features in the Go MCP
 ✅ Basic STDIO connection handling
 ✅ Test connection timeout scenarios
 ✅ Test graceful shutdown behavior
-❌ Test reconnection backoff
+✅ Test reconnection backoff
 ✅ Test connection state transitions
 ✅ Test multiple connection attempts
 
 ## Transport-Specific Tests:
 ### STDIO:
 ✅ Basic pipe communication
-❌ Test pipe closure handling
+✅ Test pipe closure handling
 ❌ Test buffer overflow scenarios
 ❌ Test partial writes
 
@@ -41,7 +41,10 @@ This document tracks the implementation status of various features in the Go MCP
 ### WebSocket:
 ✅ Test ping/pong handling
 ✅ Test message fragmentation
-❌ Test close code handling
+✅ Test close code handling
+✅ Test reconnection logic
+✅ Test connection state management
+✅ Test batch operations
 
 ## Tool Streaming:
 ❌ Test partial results streaming
@@ -68,6 +71,8 @@ This document tracks the implementation status of various features in the Go MCP
 ✅ Test resource templates
 
 ## Batch Operations:
+✅ Test basic batch requests
+✅ Test empty batch requests
 ❌ Test large batch requests
 ❌ Test partial batch failures
 ❌ Test batch ordering
@@ -92,14 +97,16 @@ This document tracks the implementation status of various features in the Go MCP
 ✅ Basic tool execution
 ✅ Basic initialization
 ✅ Progress reporting
-❌ Cancellation support
+✅ Cancellation support
 ✅ Resource template support
 ❌ Streaming support
+✅ Method name compatibility
+✅ Batch request support
 
 ## Server Features:
 ✅ Basic request handling
 ✅ Basic tool registration
-✅ Resource template handling
-✅ Progress reporting
+❌ Resource template handling
+❌ Progress reporting
 ❌ Cancellation handling
 ❌ Streaming response support 

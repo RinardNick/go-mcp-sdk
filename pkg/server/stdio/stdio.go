@@ -109,6 +109,12 @@ func (t *Transport) readLoop(ctx context.Context) {
 }
 
 func (t *Transport) handleRequest(ctx context.Context, req Request) *types.Response {
+	// Log method name usage for tool-related methods
+	switch req.Method {
+	case "tools/list", "mcp/list_tools", "tools/call", "mcp/call_tool":
+		t.logger.Printf("Method name used: %s", req.Method)
+	}
+
 	resp := &types.Response{
 		Jsonrpc: "2.0",
 		ID:      req.ID,

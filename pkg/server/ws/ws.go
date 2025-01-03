@@ -270,6 +270,12 @@ func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
 		var result interface{}
 		var handleErr error
 
+		// Log method name usage for tool-related methods
+		switch req.Method {
+		case "tools/list", "mcp/list_tools", "tools/call", "mcp/call_tool":
+			t.logger.Printf("Method name used: %s", req.Method)
+		}
+
 		switch req.Method {
 		case "tools/list", "mcp/list_tools":
 			result = struct {
