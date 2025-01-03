@@ -7,7 +7,8 @@ import (
 
 // ClientCapabilities represents client capabilities
 type ClientCapabilities struct {
-	Tools *ToolCapabilities `json:"tools,omitempty"`
+	Tools     *ToolCapabilities      `json:"tools,omitempty"`
+	Streaming *StreamingCapabilities `json:"streaming,omitempty"`
 }
 
 // ToolCapabilities represents tool-related capabilities
@@ -67,7 +68,16 @@ func NewToolInputSchema(schema map[string]interface{}) (json.RawMessage, error) 
 // ToolCall represents a tool execution request
 type ToolCall struct {
 	Name       string                 `json:"name"`
-	Parameters map[string]interface{} `json:"parameters"`
+	Parameters map[string]interface{} `json:"parameters,omitempty"`
+	Arguments  map[string]interface{} `json:"arguments,omitempty"`
+}
+
+// GetParameters returns the parameters for the tool call, preferring Parameters over Arguments
+func (tc *ToolCall) GetParameters() map[string]interface{} {
+	if tc.Parameters != nil {
+		return tc.Parameters
+	}
+	return tc.Arguments
 }
 
 // ToolResult represents the result of a tool execution
@@ -206,13 +216,19 @@ type StreamHandler func([]byte) error
 
 // StreamEvent represents a streaming event from a tool
 type StreamEvent struct {
-	ToolID string          `json:"toolID"`
-	Data   json.RawMessage `json:"data"`
+	Method string     `json:"method"`
+	Params StreamData `json:"params"`
+}
+
+// StreamData represents the data in a stream event
+type StreamData struct {
+	Data   string `json:"data"`
+	ToolID string `json:"toolID"`
 }
 
 // StreamingCapabilities represents streaming capabilities
 type StreamingCapabilities struct {
-	SupportsStreaming bool `json:"supportsStreaming"`
+	Supported bool `json:"supported"`
 }
 
 // ProgressHandler is a function that handles progress notifications

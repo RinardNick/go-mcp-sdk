@@ -121,6 +121,56 @@ func (t *Transport) handleRequest(ctx context.Context, req Request) *types.Respo
 	}
 
 	switch req.Method {
+	case "initialize":
+		var params types.InitializeParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			resp.Error = types.InvalidParamsError(err.Error())
+			break
+		}
+
+		result, err := t.server.HandleInitialize(ctx, params)
+		if err != nil {
+			resp.Error = types.InternalError(err.Error())
+			break
+		}
+
+		resultBytes, err := json.Marshal(result)
+		if err != nil {
+			resp.Error = types.InternalError(fmt.Sprintf("failed to marshal result: %v", err))
+			break
+		}
+		resp.Result = json.RawMessage(resultBytes)
+
+	case "notifications/initialized":
+		// This is a notification, no response needed
+		return nil
+
+	case "tools/call":
+		var toolCall types.ToolCall
+		if err := json.Unmarshal(req.Params, &toolCall); err != nil {
+			resp.Error = types.InvalidParamsError(err.Error())
+			break
+		}
+
+		// Extract tool name and parameters from params
+		if toolCall.Name == "" {
+			resp.Error = types.InvalidParamsError("tool name is required")
+			break
+		}
+
+		result, err := t.server.HandleToolCall(ctx, toolCall)
+		if err != nil {
+			resp.Error = types.InternalError(err.Error())
+			break
+		}
+
+		resultBytes, err := json.Marshal(result)
+		if err != nil {
+			resp.Error = types.InternalError(fmt.Sprintf("failed to marshal result: %v", err))
+			break
+		}
+		resp.Result = json.RawMessage(resultBytes)
+
 	case "tools/list", "mcp/list_tools":
 		// Check if tools are enabled
 		if enabled, ok := t.server.GetInitializationOptions().Capabilities["tools"].(bool); !ok || !enabled {

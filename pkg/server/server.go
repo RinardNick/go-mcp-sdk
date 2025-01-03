@@ -482,7 +482,7 @@ func (s *BaseServer) HandleToolCall(ctx context.Context, call types.ToolCall) (r
 		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal tool schema: %w", err)
 		}
-		if err := validation.ValidateParameters(call.Parameters, schema); err != nil {
+		if err := validation.ValidateParameters(call.GetParameters(), schema); err != nil {
 			return nil, types.InvalidParamsError(fmt.Sprintf("invalid parameters: %v", err))
 		}
 	}
@@ -492,7 +492,7 @@ func (s *BaseServer) HandleToolCall(ctx context.Context, call types.ToolCall) (r
 	errChan := make(chan error, 1)
 
 	go func() {
-		result, err := handler(ctx, call.Parameters)
+		result, err := handler(ctx, call.GetParameters())
 		if err != nil {
 			errChan <- err
 			return
