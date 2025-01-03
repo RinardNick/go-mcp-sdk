@@ -21,10 +21,12 @@ type StdioClient struct {
 	nextID           int64
 	mu               sync.Mutex
 	progressHandler  types.ProgressHandler
+	streamHandler    types.StreamHandler
 	notificationChan chan types.Notification
 	pendingRequests  map[int64]chan *Response
 	initializeParams *types.InitializeParams
 	protocolVersion  string
+	listToolsMethod  string // Cached method name for listing tools
 }
 
 // NewStdioClient creates a new StdioClient
@@ -37,12 +39,23 @@ func NewStdioClient(stdin io.Writer, stdout io.Reader) *StdioClient {
 		notificationChan: make(chan types.Notification),
 		initializeParams: nil,
 		protocolVersion:  "",
+		listToolsMethod:  "",
 	}
 }
 
 // OnProgress sets the handler for progress notifications
 func (c *StdioClient) OnProgress(handler types.ProgressHandler) {
 	c.progressHandler = handler
+}
+
+// OnStream sets the handler for stream data
+func (c *StdioClient) OnStream(handler types.StreamHandler) {
+	c.streamHandler = handler
+}
+
+// SetInitializeParams sets the initialization parameters for the client
+func (c *StdioClient) SetInitializeParams(params *types.InitializeParams) {
+	c.initializeParams = params
 }
 
 // handleNotification processes notifications from the server
@@ -55,6 +68,22 @@ func (c *StdioClient) handleNotification(notification types.Notification) error 
 				return fmt.Errorf("failed to unmarshal progress notification: %w", err)
 			}
 			c.progressHandler(progress)
+		}
+	case "tools/stream":
+		if c.streamHandler != nil {
+			// Pass the entire notification message to the stream handler
+			msg := map[string]interface{}{
+				"jsonrpc": "2.0",
+				"method":  notification.Method,
+				"params":  json.RawMessage(notification.Params),
+			}
+			msgBytes, err := json.Marshal(msg)
+			if err != nil {
+				return fmt.Errorf("failed to marshal stream notification: %w", err)
+			}
+			if err := c.streamHandler(msgBytes); err != nil {
+				return fmt.Errorf("stream handler error: %w", err)
+			}
 		}
 	default:
 		// Forward notification to channel for other handlers
@@ -208,14 +237,65 @@ func (c *StdioClient) Initialize(ctx context.Context) error {
 
 // ListTools lists all available tools
 func (c *StdioClient) ListTools(ctx context.Context) ([]types.Tool, error) {
+	// If we have a cached method name, try it first
+	if c.listToolsMethod != "" {
+		resp, err := c.SendRequest(ctx, c.listToolsMethod, nil)
+		if err == nil {
+			// Try to unmarshal as array first (mcp/list_tools format)
+			var tools []types.Tool
+			if err := json.Unmarshal(resp.Result, &tools); err == nil {
+				return tools, nil
+			}
+
+			// If that fails, try to unmarshal as struct (tools/list format)
+			var result struct {
+				Tools []types.Tool `json:"tools"`
+			}
+			if err := json.Unmarshal(resp.Result, &result); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal tools: %w", err)
+			}
+			return result.Tools, nil
+		}
+
+		// If the cached method fails with something other than method not found,
+		// return the error
+		if mcpErr, ok := err.(*types.MCPError); !ok || mcpErr.Code != types.ErrMethodNotFound {
+			return nil, fmt.Errorf("failed to list tools: %w", err)
+		}
+
+		// Clear the cached method if it's no longer valid
+		c.listToolsMethod = ""
+	}
+
+	// Try tools/list first
 	resp, err := c.SendRequest(ctx, "tools/list", nil)
 	if err != nil {
 		if err == context.Canceled || err == context.DeadlineExceeded {
 			return nil, err
 		}
-		return nil, fmt.Errorf("failed to list tools: %w", err)
+		// If method not found, try mcp/list_tools
+		if mcpErr, ok := err.(*types.MCPError); ok && mcpErr.Code == types.ErrMethodNotFound {
+			resp, err = c.SendRequest(ctx, "mcp/list_tools", nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list tools: %w", err)
+			}
+			// Cache the successful method name
+			c.listToolsMethod = "mcp/list_tools"
+		} else {
+			return nil, fmt.Errorf("failed to list tools: %w", err)
+		}
+	} else {
+		// Cache the successful method name
+		c.listToolsMethod = "tools/list"
 	}
 
+	// Try to unmarshal as array first (mcp/list_tools format)
+	var tools []types.Tool
+	if err := json.Unmarshal(resp.Result, &tools); err == nil {
+		return tools, nil
+	}
+
+	// If that fails, try to unmarshal as struct (tools/list format)
 	var result struct {
 		Tools []types.Tool `json:"tools"`
 	}
@@ -385,11 +465,6 @@ func (c *StdioClient) ListResources(ctx context.Context) ([]types.Resource, erro
 	}
 
 	return result.Resources, nil
-}
-
-// SetInitializeParams sets the initialization parameters for the client
-func (c *StdioClient) SetInitializeParams(params *types.InitializeParams) {
-	c.initializeParams = params
 }
 
 // GetResourceTemplates returns a list of available resource templates

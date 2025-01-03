@@ -53,6 +53,7 @@ func handleRequest(req request) *types.Response {
 				"tools": map[string]interface{}{
 					"supportsProgress":     true,
 					"supportsCancellation": true,
+					"supportsStreaming":    true,
 				},
 			},
 			"serverInfo": map[string]interface{}{
@@ -68,7 +69,7 @@ func handleRequest(req request) *types.Response {
 		resp.Result = resultBytes
 		return resp
 
-	case "tools/list":
+	case "tools/list", "mcp/list_tools":
 		log.Printf("Handling list_tools request")
 		inputSchema := map[string]interface{}{
 			"type": "object",
@@ -105,6 +106,25 @@ func handleRequest(req request) *types.Response {
 			return resp
 		}
 
+		// Add streaming tool
+		streamSchema := map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"count": map[string]interface{}{
+					"type":        "integer",
+					"description": "Number of stream events to send",
+					"minimum":     1,
+					"maximum":     10,
+				},
+			},
+			"required": []string{"count"},
+		}
+		streamSchemaBytes, err := types.NewToolInputSchema(streamSchema)
+		if err != nil {
+			resp.Error = types.InternalError(err)
+			return resp
+		}
+
 		tools := []types.Tool{
 			{
 				Name:        "test_tool",
@@ -115,6 +135,11 @@ func handleRequest(req request) *types.Response {
 				Name:        "long_operation",
 				Description: "A long-running operation that reports progress",
 				InputSchema: longOpSchemaBytes,
+			},
+			{
+				Name:        "stream_data",
+				Description: "A tool that streams data",
+				InputSchema: streamSchemaBytes,
 			},
 		}
 		result := map[string]interface{}{
@@ -128,7 +153,7 @@ func handleRequest(req request) *types.Response {
 		resp.Result = resultBytes
 		return resp
 
-	case "tools/call":
+	case "tools/call", "mcp/call_tool":
 		log.Printf("Handling tool call request")
 		var params struct {
 			Name      string                 `json:"name"`
@@ -211,6 +236,39 @@ func handleRequest(req request) *types.Response {
 					{
 						"type": "text",
 						"text": "Operation completed",
+					},
+				},
+				"isError": false,
+			}
+			resultBytes, err := json.Marshal(result)
+			if err != nil {
+				resp.Error = types.InternalError(err)
+				return resp
+			}
+			resp.Result = resultBytes
+			return resp
+
+		case "stream_data":
+			count := int(params.Arguments["count"].(float64))
+			for i := 1; i <= count; i++ {
+				notification := map[string]interface{}{
+					"jsonrpc": "2.0",
+					"method":  "tools/stream",
+					"params": map[string]interface{}{
+						"toolID": "stream_data",
+						"data":   fmt.Sprintf("Stream data %d of %d", i, count),
+					},
+				}
+				if err := writeNotification(os.Stdout, notification); err != nil {
+					resp.Error = types.InternalError(err)
+					return resp
+				}
+			}
+			result := map[string]interface{}{
+				"content": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": "Streaming completed",
 					},
 				},
 				"isError": false,

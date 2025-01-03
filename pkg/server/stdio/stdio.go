@@ -115,7 +115,13 @@ func (t *Transport) handleRequest(ctx context.Context, req Request) *types.Respo
 	}
 
 	switch req.Method {
-	case "mcp/list_tools":
+	case "tools/list", "mcp/list_tools":
+		// Check if tools are enabled
+		if enabled, ok := t.server.GetInitializationOptions().Capabilities["tools"].(bool); !ok || !enabled {
+			resp.Error = types.MethodNotFoundError(fmt.Sprintf("Method not found: %s", req.Method))
+			break
+		}
+
 		tools := t.server.GetTools()
 		result := map[string]interface{}{
 			"tools": tools,

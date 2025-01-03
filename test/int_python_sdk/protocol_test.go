@@ -90,7 +90,7 @@ func TestProtocolVersionNegotiation(t *testing.T) {
 			// Set the protocol version for the test
 			client.SetInitializeParams(&types.InitializeParams{
 				ProtocolVersion: tc.version,
-				ClientInfo: types.Implementation{
+				ClientInfo: types.ClientInfo{
 					Name:    "go-mcp-sdk",
 					Version: "1.0.0",
 				},
@@ -211,7 +211,7 @@ func TestProtocolVersionValidation(t *testing.T) {
 			// Set the protocol version for the test
 			client.SetInitializeParams(&types.InitializeParams{
 				ProtocolVersion: tt.protocolVersion,
-				ClientInfo: types.Implementation{
+				ClientInfo: types.ClientInfo{
 					Name:    "test-client",
 					Version: "1.0.0",
 				},

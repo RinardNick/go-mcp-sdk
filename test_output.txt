@@ -1,0 +1,50 @@
+=== RUN   TestProtocolVersionNegotiation
+=== RUN   TestProtocolVersionNegotiation/Reject_unsupported_protocol_version
+=== RUN   TestProtocolVersionNegotiation/Reject_malformed_protocol_version
+=== RUN   TestProtocolVersionNegotiation/Protocol_version_mismatch_error_details
+=== RUN   TestProtocolVersionNegotiation/Protocol_version_fallback
+=== RUN   TestProtocolVersionNegotiation/Fallback_to_older_supported_version
+=== RUN   TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Exact_match_with_primary_version
+=== RUN   TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Fallback_to_newest_compatible_version
+=== RUN   TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Fallback_to_older_compatible_version
+=== RUN   TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Fallback_to_oldest_supported_version
+=== RUN   TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Reject_version_between_supported_versions
+=== RUN   TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Reject_version_newer_than_primary
+=== RUN   TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Reject_version_older_than_oldest_supported
+--- PASS: TestProtocolVersionNegotiation (0.76s)
+    --- PASS: TestProtocolVersionNegotiation/Reject_unsupported_protocol_version (0.00s)
+    --- PASS: TestProtocolVersionNegotiation/Reject_malformed_protocol_version (0.00s)
+    --- PASS: TestProtocolVersionNegotiation/Protocol_version_mismatch_error_details (0.00s)
+    --- PASS: TestProtocolVersionNegotiation/Protocol_version_fallback (0.15s)
+    --- PASS: TestProtocolVersionNegotiation/Fallback_to_older_supported_version (0.60s)
+        --- PASS: TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Exact_match_with_primary_version (0.15s)
+        --- PASS: TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Fallback_to_newest_compatible_version (0.15s)
+        --- PASS: TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Fallback_to_older_compatible_version (0.15s)
+        --- PASS: TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Fallback_to_oldest_supported_version (0.15s)
+        --- PASS: TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Reject_version_between_supported_versions (0.00s)
+        --- PASS: TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Reject_version_newer_than_primary (0.00s)
+        --- PASS: TestProtocolVersionNegotiation/Fallback_to_older_supported_version/Reject_version_older_than_oldest_supported (0.00s)
+=== RUN   TestResourceTemplates
+=== RUN   TestResourceTemplates/GetResourceTemplates
+=== RUN   TestResourceTemplates/ApplyResourceTemplate
+=== RUN   TestResourceTemplates/TemplateValidation
+=== RUN   TestResourceTemplates/TemplateValidation/Valid_parameters
+=== RUN   TestResourceTemplates/TemplateValidation/Missing_required_parameter
+=== RUN   TestResourceTemplates/TemplateValidation/Invalid_parameter_type
+=== RUN   TestResourceTemplates/TemplateValidation/Non-existent_template
+--- PASS: TestResourceTemplates (0.00s)
+    --- PASS: TestResourceTemplates/GetResourceTemplates (0.00s)
+    --- PASS: TestResourceTemplates/ApplyResourceTemplate (0.00s)
+    --- PASS: TestResourceTemplates/TemplateValidation (0.00s)
+        --- PASS: TestResourceTemplates/TemplateValidation/Valid_parameters (0.00s)
+        --- PASS: TestResourceTemplates/TemplateValidation/Missing_required_parameter (0.00s)
+        --- PASS: TestResourceTemplates/TemplateValidation/Invalid_parameter_type (0.00s)
+        --- PASS: TestResourceTemplates/TemplateValidation/Non-existent_template (0.00s)
+=== RUN   TestMethodNameCompatibility
+=== RUN   TestMethodNameCompatibility/Server_Returns_Identical_Response_For_Both_Method_Names
+stdio: 2025/01/02 19:48:52.604492 Received single request: {Jsonrpc:2.0 Method:tools/list Params:[] ID:1}
+stdio: 2025/01/02 19:48:52.605046 Writing response: &{Jsonrpc:2.0 Result:[123 34 116 111 111 108 115 34 58 91 123 34 110 97 109 101 34 58 34 116 101 115 116 95 116 111 111 108 34 44 34 100 101 115 99 114 105 112 116 105 111 110 34 58 34 65 32 116 101 115 116 32 116 111 111 108 34 44 34 112 97 114 97 109 101 116 101 114 115 34 58 110 117 108 108 44 34 105 110 112 117 116 83 99 104 101 109 97 34 58 123 34 112 114 111 112 101 114 116 105 101 115 34 58 123 34 112 97 114 97 109 49 34 58 123 34 100 101 115 99 114 105 112 116 105 111 110 34 58 34 65 32 116 101 115 116 32 112 97 114 97 109 101 116 101 114 34 44 34 116 121 112 101 34 58 34 115 116 114 105 110 103 34 125 125 44 34 114 101 113 117 105 114 101 100 34 58 91 34 112 97 114 97 109 49 34 93 44 34 116 121 112 101 34 58 34 111 98 106 101 99 116 34 125 125 93 125] Error:<nil> ID:1}
+stdio: 2025/01/02 19:48:52.605101 Response written successfully
+stdio: 2025/01/02 19:48:52.605106 Received single request: {Jsonrpc:2.0 Method:mcp/list_tools Params:[] ID:2}
+stdio: 2025/01/02 19:48:52.605110 Writing response: &{Jsonrpc:2.0 Result:[123 34 116 111 111 108 115 34 58 91 123 34 110 97 109 101 34 58 34 116 101 115 116 95 116 111 111 108 34 44 34 100 101 115 99 114 105 112 116 105 111 110 34 58 34 65 32 116 101 115 116 32 116 111 111 108 34 44 34 112 97 114 97 109 101 116 101 114 115 34 58 110 117 108 108 44 34 105 110 112 117 116 83 99 104 101 109 97 34 58 123 34 112 114 111 112 101 114 116 105 101 115 34 58 123 34 112 97 114 97 109 49 34 58 123 34 100 101 115 99 114 105 112 116 105 111 110 34 58 34 65 32 116 101 115 116 32 112 97 114 97 109 101 116 101 114 34 44 34 116 121 112 101 34 58 34 115 116 114 105 110 103 34 125 125 44 34 114 101 113 117 105 114 101 100 34 58 91 34 112 97 114 97 109 49 34 93 44 34 116 121 112 101 34 58 34 111 98 106 101 99 116 34 125 125 93 125] Error:<nil> ID:2}
+stdio: 2025/01/02 19:48:52.605150 Response written successfully

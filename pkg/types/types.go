@@ -7,7 +7,7 @@ import (
 
 // ClientCapabilities represents client capabilities
 type ClientCapabilities struct {
-	Tools *ToolCapabilities `json:"tools"`
+	Tools *ToolCapabilities `json:"tools,omitempty"`
 }
 
 // ToolCapabilities represents tool-related capabilities
@@ -18,7 +18,7 @@ type ToolCapabilities struct {
 
 // RootsCapability represents the roots capability
 type RootsCapability struct {
-	ListChanged bool `json:"list_changed,omitempty"`
+	ListChanged bool `json:"listChanged,omitempty"`
 }
 
 // Implementation represents a client or server implementation
@@ -30,7 +30,7 @@ type Implementation struct {
 // InitializeParams represents client initialization parameters
 type InitializeParams struct {
 	ProtocolVersion string             `json:"protocolVersion"`
-	ClientInfo      Implementation     `json:"clientInfo"`
+	ClientInfo      ClientInfo         `json:"clientInfo"`
 	Capabilities    ClientCapabilities `json:"capabilities"`
 }
 
@@ -45,7 +45,7 @@ type Tool struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	Parameters  map[string]interface{} `json:"parameters"`
-	InputSchema json.RawMessage        `json:"input_schema"`
+	InputSchema json.RawMessage        `json:"inputSchema"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -195,10 +195,24 @@ func (e *ParseError) Error() string {
 
 // Progress represents a progress notification from a tool
 type Progress struct {
-	ToolID  string `json:"toolID,tool_id"`
+	ToolID  string `json:"toolID"`
 	Current int    `json:"current"`
 	Total   int    `json:"total"`
 	Message string `json:"message"`
+}
+
+// StreamHandler is a function that handles stream data
+type StreamHandler func([]byte) error
+
+// StreamEvent represents a streaming event from a tool
+type StreamEvent struct {
+	ToolID string          `json:"toolID"`
+	Data   json.RawMessage `json:"data"`
+}
+
+// StreamingCapabilities represents streaming capabilities
+type StreamingCapabilities struct {
+	SupportsStreaming bool `json:"supportsStreaming"`
 }
 
 // ProgressHandler is a function that handles progress notifications
@@ -223,15 +237,15 @@ type ServerInfo struct {
 
 // InitializeResult represents the result of initialization
 type InitializeResult struct {
-	ProtocolVersion string             `json:"protocol_version"`
+	ProtocolVersion string             `json:"protocolVersion"`
 	Capabilities    ServerCapabilities `json:"capabilities"`
-	ServerInfo      Implementation     `json:"server_info"`
+	ServerInfo      Implementation     `json:"serverInfo"`
 }
 
 // InitializationOptions represents server initialization options
 type InitializationOptions struct {
-	ServerName    string             `json:"server_name"`
-	ServerVersion string             `json:"server_version"`
+	ServerName    string             `json:"serverName"`
+	ServerVersion string             `json:"serverVersion"`
 	Capabilities  ServerCapabilities `json:"capabilities"`
 }
 

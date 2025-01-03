@@ -271,7 +271,7 @@ func (t *Transport) handleWS(w http.ResponseWriter, r *http.Request) {
 		var handleErr error
 
 		switch req.Method {
-		case "tools/list":
+		case "tools/list", "mcp/list_tools":
 			result = struct {
 				Tools []types.Tool `json:"tools"`
 			}{
@@ -362,9 +362,7 @@ func (t *Transport) GetConnectionStates() map[string]ConnectionState {
 	states := make(map[string]ConnectionState)
 	t.clients.Range(func(key, value interface{}) bool {
 		if info, ok := value.(*clientInfo); ok {
-			if info.conn != nil {
-				states[info.conn.RemoteAddr().String()] = info.state
-			}
+			states[info.conn.RemoteAddr().String()] = info.state
 		}
 		return true
 	})

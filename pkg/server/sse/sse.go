@@ -174,7 +174,7 @@ func (t *Transport) handleRPC(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	switch req.Method {
-	case "tools/list":
+	case "tools/list", "mcp/list_tools":
 		result = struct {
 			Tools []types.Tool `json:"tools"`
 		}{

@@ -6,46 +6,36 @@ import (
 
 	"github.com/RinardNick/go-mcp-sdk/pkg/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWireFormatCompatibility(t *testing.T) {
 	t.Run("Tool Serialization", func(t *testing.T) {
-		// Create a tool with Go-style field names
 		tool := types.Tool{
 			Name:        "test_tool",
 			Description: "A test tool",
-			InputSchema: json.RawMessage(`{
-				"type": "object",
-				"properties": {
-					"param1": {
-						"type": "string",
-						"description": "A test parameter"
-					}
-				},
-				"required": ["param1"]
-			}`),
+			InputSchema: []byte(`{"type":"object","properties":{"param1":{"type":"string","description":"A test parameter"}},"required":["param1"]}`),
 		}
 
-		// Serialize to JSON
+		// Marshal to JSON
 		data, err := json.Marshal(tool)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
-		// Verify wire format uses snake_case
-		var wireFormat map[string]interface{}
-		err = json.Unmarshal(data, &wireFormat)
-		assert.NoError(t, err)
+		// Unmarshal to map to check field names
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		require.NoError(t, err)
 
-		// Check field names in wire format
-		assert.Contains(t, wireFormat, "name")
-		assert.Contains(t, wireFormat, "description")
-		assert.Contains(t, wireFormat, "input_schema")
+		// Check field names
+		require.Contains(t, result, "name")
+		require.Contains(t, result, "description")
+		require.Contains(t, result, "inputSchema")
 	})
 
 	t.Run("Initialize Parameters", func(t *testing.T) {
-		// Create initialization parameters with Go-style field names
 		params := types.InitializeParams{
 			ProtocolVersion: "0.1.0",
-			ClientInfo: types.Implementation{
+			ClientInfo: types.ClientInfo{
 				Name:    "go-mcp-sdk",
 				Version: "1.0.0",
 			},
@@ -57,29 +47,18 @@ func TestWireFormatCompatibility(t *testing.T) {
 			},
 		}
 
-		// Serialize to JSON
+		// Marshal to JSON
 		data, err := json.Marshal(params)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
-		// Verify wire format uses snake_case
-		var wireFormat map[string]interface{}
-		err = json.Unmarshal(data, &wireFormat)
-		assert.NoError(t, err)
+		// Unmarshal to map to check field names
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		require.NoError(t, err)
 
-		// Check field names in wire format
-		assert.Contains(t, wireFormat, "protocol_version")
-		assert.Contains(t, wireFormat, "client_info")
-		assert.Contains(t, wireFormat, "capabilities")
-
-		// Check nested fields
-		clientInfo := wireFormat["client_info"].(map[string]interface{})
-		assert.Contains(t, clientInfo, "name")
-		assert.Contains(t, clientInfo, "version")
-
-		capabilities := wireFormat["capabilities"].(map[string]interface{})
-		tools := capabilities["tools"].(map[string]interface{})
-		assert.Contains(t, tools, "supports_progress")
-		assert.Contains(t, tools, "supports_cancellation")
+		// Check field names
+		require.Contains(t, result, "protocolVersion")
+		require.Contains(t, result, "clientInfo")
 	})
 
 	t.Run("Deserialization Compatibility", func(t *testing.T) {

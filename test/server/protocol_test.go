@@ -24,7 +24,7 @@ func TestProtocolVersionNegotiation(t *testing.T) {
 		// Try to initialize with an unsupported version
 		initParams := types.InitializeParams{
 			ProtocolVersion: "999.0.0",
-			ClientInfo: types.Implementation{
+			ClientInfo: types.ClientInfo{
 				Name:    "test-client",
 				Version: "1.0.0",
 			},
@@ -96,7 +96,7 @@ func TestProtocolVersionNegotiation(t *testing.T) {
 		for _, version := range testCases {
 			result, err := s.HandleInitialize(context.Background(), types.InitializeParams{
 				ProtocolVersion: version,
-				ClientInfo: types.Implementation{
+				ClientInfo: types.ClientInfo{
 					Name:    "test-client",
 					Version: "1.0",
 				},
@@ -119,7 +119,7 @@ func TestProtocolVersionNegotiation(t *testing.T) {
 
 		result, err := s.HandleInitialize(context.Background(), types.InitializeParams{
 			ProtocolVersion: "2.0", // Different major version
-			ClientInfo: types.Implementation{
+			ClientInfo: types.ClientInfo{
 				Name:    "test-client",
 				Version: "1.0",
 			},
@@ -170,7 +170,7 @@ func TestProtocolVersionNegotiation(t *testing.T) {
 		// Test that we can fall back to an older version
 		result, err := s.HandleInitialize(context.Background(), types.InitializeParams{
 			ProtocolVersion: "1.0",
-			ClientInfo: types.Implementation{
+			ClientInfo: types.ClientInfo{
 				Name:    "test-client",
 				Version: "1.0",
 			},
@@ -191,7 +191,7 @@ func TestProtocolVersionNegotiation(t *testing.T) {
 		// Test that we still reject unsupported versions
 		result, err = s.HandleInitialize(context.Background(), types.InitializeParams{
 			ProtocolVersion: "0.5",
-			ClientInfo: types.Implementation{
+			ClientInfo: types.ClientInfo{
 				Name:    "test-client",
 				Version: "1.0",
 			},
@@ -272,7 +272,7 @@ func TestProtocolVersionNegotiation(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				initParams := types.InitializeParams{
 					ProtocolVersion: tc.requestVersion,
-					ClientInfo: types.Implementation{
+					ClientInfo: types.ClientInfo{
 						Name:    "test-client",
 						Version: "1.0.0",
 					},
